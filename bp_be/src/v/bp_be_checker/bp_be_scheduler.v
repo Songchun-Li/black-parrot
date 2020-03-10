@@ -36,7 +36,6 @@ module bp_be_scheduler
   , input [cfg_bus_width_lp-1:0]       cfg_bus_i
   , output [dword_width_p-1:0]         cfg_irf_data_o
 
-  , input                              accept_irq_i
   , output [isd_status_width_lp-1:0]   isd_status_o
   , input [vaddr_width_p-1:0]          expected_npc_i
   , input                              dispatch_v_i
@@ -158,7 +157,7 @@ always_comb
   end
 
 // Interface handshakes
-assign fe_queue_yumi_o = ~suppress_iss_i & fe_queue_v_i & (dispatch_v_i & ~accept_irq_i);
+assign fe_queue_yumi_o = ~suppress_iss_i & fe_queue_v_i & dispatch_v_i;
 
 // Queue control signals
 assign fe_queue_clr_o  = suppress_iss_i;
@@ -196,8 +195,7 @@ bp_fe_exception_code_e fe_exc_isd;
 bp_be_decode_s          decoded;
 bp_be_instr_decoder
  instr_decoder
-  (.interrupt_v_i(accept_irq_i)
-   ,.fe_exc_not_instr_i(issue_pkt.fe_exception_not_instr)
+  (.fe_exc_not_instr_i(issue_pkt.fe_exception_not_instr)
    ,.fe_exc_i(issue_pkt.fe_exception_code)
    ,.instr_i(issue_pkt.instr)
 
@@ -208,10 +206,9 @@ bp_be_dispatch_pkt_s dispatch_pkt;
 always_comb
   begin
     // Calculator status ISD stage
-    isd_status.isd_v        = fe_queue_yumi_o & ~accept_irq_i;
+    isd_status.isd_v        = fe_queue_yumi_o;
     isd_status.isd_pc       = issue_pkt.pc;
     isd_status.isd_branch_metadata_fwd = issue_pkt.branch_metadata_fwd;
-    isd_status.isd_irq_v    = accept_irq_i;
     isd_status.isd_fence_v  = fe_queue_v_i & issue_pkt.fence_v;
     isd_status.isd_mem_v    = fe_queue_v_i & issue_pkt.mem_v;
     isd_status.isd_irs1_v   = fe_queue_v_i & issue_pkt.irs1_v;
@@ -222,9 +219,8 @@ always_comb
     isd_status.isd_rs2_addr = issue_pkt.instr.t.rtype.rs2_addr;
 
     // Form dispatch packet
-    dispatch_pkt.v      = (fe_queue_yumi_o | (accept_irq_i & dispatch_v_i));
-    dispatch_pkt.poison = (~dispatch_pkt.v | poison_iss_i)
-                          & ~(accept_irq_i & dispatch_v_i);
+    dispatch_pkt.v      = fe_queue_yumi_o;
+    dispatch_pkt.poison = ~dispatch_pkt.v | poison_iss_i;
     dispatch_pkt.pc     = expected_npc_i;
     dispatch_pkt.instr  = issue_pkt.instr;
     dispatch_pkt.rs1    = irf_rs1; // TODO: Add float forwarding

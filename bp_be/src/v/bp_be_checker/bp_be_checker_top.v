@@ -79,7 +79,6 @@ module bp_be_checker_top
    , output                           chk_dispatch_v_o
    , output                           flush_o
 
-   , input                            accept_irq_i
    , input                            debug_mode_i
    , input                            single_step_i
    
@@ -168,7 +167,6 @@ bp_be_scheduler
    ,.cfg_bus_i(cfg_bus_i)
    ,.cfg_irf_data_o(cfg_irf_data_o)
 
-   ,.accept_irq_i(accept_irq_i)
    ,.isd_status_o(isd_status)
    ,.expected_npc_i(expected_npc_lo)
    ,.dispatch_v_i(chk_dispatch_v_o)
