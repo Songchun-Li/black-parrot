@@ -60,6 +60,12 @@ module bp_be_checker_top
    , input                            fe_queue_v_i
    , output                           fe_queue_yumi_o
 
+   , input [reg_addr_width_p-1:0]     rs1_addr_i
+   , input                            rs1_v_i
+
+   , input [reg_addr_width_p-1:0]     rs2_addr_i
+   , input                            rs2_v_i
+
    // Instruction issue interface
    , output [dispatch_pkt_width_lp-1:0]  dispatch_pkt_o
 
@@ -99,7 +105,7 @@ assign calc_status_cast_i = calc_status_i;
 // Intermediate connections
 bp_be_isd_status_s isd_status;
 logic [vaddr_width_p-1:0] expected_npc_lo;
-logic poison_isd_lo, suppress_iss_lo;
+logic poison_iss_lo, suppress_iss_lo;
 
 // Datapath
 bp_be_director 
@@ -121,8 +127,8 @@ bp_be_director
    ,.fe_cmd_ready_i(fe_cmd_ready_i)
    ,.fe_cmd_fence_i(fe_cmd_fence_i)
 
+   ,.poison_iss_o(poison_iss_lo)
    ,.suppress_iss_o(suppress_iss_lo)
-   ,.poison_isd_o(poison_isd_lo)
 
    ,.commit_pkt_i(commit_pkt_i)
    ,.trap_pkt_i(trap_pkt_i)
@@ -165,12 +171,10 @@ bp_be_scheduler
    ,.accept_irq_i(accept_irq_i)
    ,.isd_status_o(isd_status)
    ,.expected_npc_i(expected_npc_lo)
-   ,.poison_iss_i(flush_o)
-   ,.poison_isd_i(poison_isd_lo)
    ,.dispatch_v_i(chk_dispatch_v_o)
    ,.cache_miss_v_i(commit_pkt.cache_miss | commit_pkt.tlb_miss)
    ,.cmt_v_i(commit_pkt.queue_v)
-   ,.debug_mode_i(debug_mode_i)
+   ,.poison_iss_i(poison_iss_lo)
    ,.suppress_iss_i(suppress_iss_lo)
 
    ,.fe_queue_i(fe_queue_i)
@@ -180,6 +184,11 @@ bp_be_scheduler
    ,.fe_queue_roll_o(fe_queue_roll_o)
    ,.fe_queue_deq_o(fe_queue_deq_o)
 
+   ,.rs1_addr_i(rs1_addr_i)
+   ,.rs1_v_i(rs1_v_i)
+
+   ,.rs2_addr_i(rs2_addr_i)
+   ,.rs2_v_i(rs2_v_i)
 
    ,.dispatch_pkt_o(dispatch_pkt_o)
    

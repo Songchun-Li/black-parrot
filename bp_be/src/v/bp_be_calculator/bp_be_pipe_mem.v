@@ -66,7 +66,7 @@ bp_be_decode_s    decode;
 bp_be_mmu_cmd_s   mem1_cmd, mem3_cmd_li, mem3_cmd_lo, mem3_cmd;
 bp_be_csr_cmd_s   csr_cmd_li, csr_cmd_lo;
 bp_be_mem_resp_s  mem_resp;
-rv64_instr_s      instr;
+rv64_instr_itype_s instr;
 
 assign decode = decode_i;
 assign mem_resp = mem_resp_i;
@@ -123,7 +123,7 @@ wire csr_imm_op = (decode.fu_op == e_csrrwi)
 always_comb
   begin
     csr_cmd_li.csr_op   = decode.fu_op;
-    csr_cmd_li.csr_addr = instr.fields.itype.imm12;
+    csr_cmd_li.csr_addr = instr.imm12;
     csr_cmd_li.data     = csr_imm_op ? imm_i : rs1_i;
   end
 
