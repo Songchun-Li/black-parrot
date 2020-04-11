@@ -761,18 +761,24 @@ module bp_cce_msg
                 lce_cmd.header.size = decoded_inst_i.msg_size;
                 lce_cmd.data = {'0, src_a_i};
               end else begin
+                // TODO: support sending combo commands
                 lce_cmd.header.way_id = way_i;
+<<<<<<< HEAD
                 // size is set based on message type:
                 // by default, leave as '0 equivalent size
                 // only messages that have data are data and uc_data, which are auto-forwarded
                 // for now, use pushqc to send these messages
+=======
+                // TODO: support st_wb command
+>>>>>>> e78965d1... WiP: add owner coh state field, update implementation
                 if ((decoded_inst_i.lce_cmd == e_lce_cmd_st)
                     | (decoded_inst_i.lce_cmd == e_lce_cmd_st_wakeup)) begin
                   lce_cmd.header.state = coh_state_i;
                 end
                 // Transfer commands set target and target way fields
+                // TODO: support st_tr and st_tr_wb commands
                 if (decoded_inst_i.lce_cmd == e_lce_cmd_tr) begin
-                  lce_cmd.header.state = coh_state_i;
+                  lce_cmd.header.target_state = coh_state_i;
                   lce_cmd.header.target = mshr.lce_id;
                   lce_cmd.header.target_way_id = mshr.lru_way_id;
                 end
