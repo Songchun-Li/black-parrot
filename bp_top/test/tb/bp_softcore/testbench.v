@@ -451,7 +451,7 @@ bind bp_be_top
        ,.dispatch_pkt_i(be_calculator.dispatch_pkt)
 
        ,.ex1_br_tgt_i(be_calculator.calc_status.ex1_npc)
-       ,.ex1_btaken_i(be_calculator.pipe_int.btaken)
+       ,.ex1_btaken_i(be_calculator.pipe_ctrl.btaken)
        ,.iwb_result_i(be_calculator.comp_stage_n[3])
        ,.fwb_result_i(be_calculator.comp_stage_n[4])
 
