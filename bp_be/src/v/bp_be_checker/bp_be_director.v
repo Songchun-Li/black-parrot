@@ -98,14 +98,12 @@ logic                                   npc_mismatch_v;
 enum logic [1:0] {e_reset, e_boot, e_run, e_fence} state_n, state_r;
 
 // Control signals
-logic npc_w_v, btaken_pending, attaboy_pending;
-
-logic [vaddr_width_p-1:0] br_mux_o, roll_mux_o, ret_mux_o, exc_mux_o;
+logic btaken_pending, attaboy_pending;
 
 // Module instantiations
 // Update the NPC on a valid instruction in ex1 or a cache miss or a tlb miss
-assign npc_w_v = cfg_bus_cast_i.npc_w_v
-                 | calc_status.ex1_instr_v
+wire npc_w_v = cfg_bus_cast_i.npc_w_v
+                 | calc_status.ex1_v
                  | (commit_pkt.tlb_miss | commit_pkt.cache_miss)
                  | (trap_pkt.exception | trap_pkt._interrupt | trap_pkt.eret);
 bsg_dff_reset_en 
@@ -120,46 +118,45 @@ bsg_dff_reset_en
    );
 assign cfg_npc_data_o = npc_r;
 
-// NPC calculation
-bsg_mux 
- #(.width_p(vaddr_width_p)
-   ,.els_p(2)   
-   )
- init_mux
-  (.data_i({cfg_bus_cast_i.npc, exc_mux_o})
-   ,.sel_i(cfg_bus_cast_i.npc_w_v)
-   ,.data_o(npc_n)
+always_comb
+  if (cfg_bus_cast_i.npc_w_v)
+    npc_n = cfg_bus_cast_i.npc;
+  else if (trap_pkt.eret)
+    npc_n = trap_pkt.epc[0+:vaddr_width_p];
+  else if (trap_pkt.exception | trap_pkt._interrupt)
+    npc_n = {trap_pkt.tvec[0+:vaddr_width_p-2], 2'b00};
+  else if (commit_pkt.tlb_miss | commit_pkt.cache_miss)
+    npc_n = commit_pkt.pc;
+  else
+    npc_n = calc_status.ex1_npc;
+
+logic [vaddr_width_p-1:0] late_npc_n, late_npc_r;
+wire late_npc_w_v = cfg_bus_cast_i.npc_w_v
+                 | calc_status.ex3_v
+                 | (commit_pkt.tlb_miss | commit_pkt.cache_miss)
+                 | (trap_pkt.exception | trap_pkt._interrupt | trap_pkt.eret);
+bsg_dff_reset_en
+ #(.width_p(vaddr_width_p), .reset_val_p(32'h8000_0000))
+ late_npc
+  (.clk_i(clk_i)
+   ,.reset_i(reset_i)
+   ,.en_i(late_npc_w_v)
+
+   ,.data_i(late_npc_n)
+   ,.data_o(late_npc_r)
    );
 
-bsg_mux 
- #(.width_p(vaddr_width_p)
-   ,.els_p(2)   
-   )
- exception_mux
-  (.data_i({ret_mux_o, roll_mux_o})
-   ,.sel_i(trap_pkt.exception | trap_pkt._interrupt | trap_pkt.eret)
-   ,.data_o(exc_mux_o)
-   );
-
-bsg_mux 
- #(.width_p(vaddr_width_p)
-   ,.els_p(2)
-   )
- roll_mux
-  (.data_i({commit_pkt.pc, calc_status.ex1_npc})
-   ,.sel_i(commit_pkt.tlb_miss | commit_pkt.cache_miss)
-   ,.data_o(roll_mux_o)
-   );
-
-bsg_mux 
- #(.width_p(vaddr_width_p)
-   ,.els_p(2)
-   )
- ret_mux
-  (.data_i({trap_pkt.epc[0+:vaddr_width_p], {trap_pkt.tvec[0+:vaddr_width_p-2], 2'b00}})
-   ,.sel_i(trap_pkt.eret)
-   ,.data_o(ret_mux_o)
-   );
+always_comb
+  if (cfg_bus_cast_i.npc_w_v)
+    late_npc_n = cfg_bus_cast_i.npc;
+  else if (trap_pkt.eret)
+    late_npc_n = trap_pkt.epc[0+:vaddr_width_p];
+  else if (trap_pkt.exception | trap_pkt._interrupt)
+    late_npc_n = {trap_pkt.tvec[0+:vaddr_width_p-2], 2'b00};
+  else if (commit_pkt.tlb_miss | commit_pkt.cache_miss)
+    late_npc_n = commit_pkt.pc;
+  else
+    late_npc_n = calc_status.ex3_npc;
 
 assign npc_mismatch_v = isd_status.isd_v & (expected_npc_o != isd_status.isd_pc);
 assign poison_isd_o = npc_mismatch_v;
