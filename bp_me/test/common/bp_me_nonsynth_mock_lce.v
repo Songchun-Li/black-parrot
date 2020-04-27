@@ -88,7 +88,7 @@ module bp_me_nonsynth_mock_lce
     , localparam lg_num_cce_lp=`BSG_SAFE_CLOG2(num_cce_p)
 
     `declare_bp_lce_cce_if_header_widths(cce_id_width_p, lce_id_width_p, paddr_width_p, assoc_p)
-    `declare_bp_lce_cce_if_widths(cce_id_width_p, lce_id_width_p, paddr_width_p, assoc_p, dword_width_p, cce_block_width_p)
+    `declare_bp_lce_cce_if_widths(cce_id_width_p, lce_id_width_p, paddr_width_p, assoc_p, cce_block_width_p, cce_block_width_p)
 
   )
   (
@@ -600,7 +600,7 @@ module bp_me_nonsynth_mock_lce
               ? e_mem_msg_size_2
               : e_mem_msg_size_1;
 
-        lce_req.data = (mshr_r.store_op) ? cmd.data : '0;
+        lce_req.data[0+:dword_width_p] = (mshr_r.store_op) ? cmd.data : '0;
 
         // wait for LCE req outbound to be ready (r&v), then wait for responses
         lce_state_n = (lce_req_ready_i)

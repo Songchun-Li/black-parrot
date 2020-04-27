@@ -36,7 +36,7 @@ module bp_cce_fsm
     , localparam lg_max_tag_sets_lp        = `BSG_SAFE_CLOG2(max_tag_sets_lp)
 
     // interface widths
-    `declare_bp_lce_cce_if_widths(cce_id_width_p, lce_id_width_p, paddr_width_p, lce_assoc_p, dword_width_p, cce_block_width_p)
+    `declare_bp_lce_cce_if_widths(cce_id_width_p, lce_id_width_p, paddr_width_p, lce_assoc_p, cce_block_width_p, cce_block_width_p)
     `declare_bp_me_if_widths(paddr_width_p, cce_block_width_p, lce_id_width_p, lce_assoc_p)
 
     , localparam counter_max = 256
@@ -93,7 +93,7 @@ module bp_cce_fsm
   // Define structure variables for output queues
 
   `declare_bp_me_if(paddr_width_p, cce_block_width_p, lce_id_width_p, lce_assoc_p);
-  `declare_bp_lce_cce_if(cce_id_width_p, lce_id_width_p, paddr_width_p, lce_assoc_p, dword_width_p, cce_block_width_p);
+  `declare_bp_lce_cce_if(cce_id_width_p, lce_id_width_p, paddr_width_p, lce_assoc_p, cce_block_width_p, cce_block_width_p);
 
   bp_lce_cce_req_s lce_req;
   bp_lce_cce_resp_s lce_resp;
@@ -657,7 +657,7 @@ module bp_cce_fsm
         lce_cmd.header.dst_id = mem_resp.header.payload.lce_id;
         lce_cmd.header.msg_type = e_lce_cmd_uc_data;
         lce_cmd.header.way_id = '0;
-        lce_cmd.data[0+:dword_width_p] = mem_resp.data[0+:dword_width_p];
+        lce_cmd.data = mem_resp.data;
         lce_cmd.header.addr = mem_resp.header.addr;
         lce_cmd.header.size = mem_resp.header.size;
 
@@ -790,7 +790,7 @@ module bp_cce_fsm
           // Uncached Store
           if (lce_req.header.msg_type == e_lce_req_type_uc_wr) begin
             mem_cmd.header.msg_type = e_cce_mem_uc_wr;
-            mem_cmd.data = {{(cce_block_width_p-dword_width_p){1'b0}}, lce_req.data};
+            mem_cmd.data = lce_req.data;
           // Uncached Load
           end else begin
             mem_cmd.header.msg_type = e_cce_mem_uc_rd;
@@ -878,7 +878,7 @@ module bp_cce_fsm
           // Uncached Store
           if (mshr_r.flags[e_opd_rqf]) begin
             mem_cmd.header.msg_type = e_cce_mem_uc_wr;
-            mem_cmd.data = {{(cce_block_width_p-dword_width_p){1'b0}}, lce_req.data};
+            mem_cmd.data = lce_req.data;
           // Uncached Load
           end else begin
             mem_cmd.header.msg_type = e_cce_mem_uc_rd;
