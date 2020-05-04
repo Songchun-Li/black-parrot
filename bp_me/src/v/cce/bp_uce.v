@@ -9,6 +9,8 @@ module bp_uce
    ,parameter assoc_p = 8
    ,parameter sets_p = 64
    ,parameter block_width_p = 512
+   ,parameter fill_width_p = 512
+
     `declare_bp_proc_params(bp_params_p)
     `declare_bp_me_if_widths(paddr_width_p, cce_block_width_p, lce_id_width_p, lce_assoc_p)
 
@@ -23,13 +25,13 @@ module bp_uce
     , localparam index_width_lp = `BSG_SAFE_CLOG2(sets_p)
     , localparam way_width_lp = `BSG_SAFE_CLOG2(assoc_p)
 
-    , localparam cache_req_width_lp = `bp_cache_req_width(dword_width_p, paddr_width_p) 
+    , localparam cache_req_width_lp = `bp_cache_req_width(dword_width_p, paddr_width_p)
     , localparam cache_req_metadata_width_lp = `bp_cache_req_metadata_width(assoc_p)
     , localparam cache_tag_mem_pkt_width_lp = `bp_cache_tag_mem_pkt_width(sets_p, assoc_p, ptag_width_p)
-    , localparam cache_data_mem_pkt_width_lp = `bp_cache_data_mem_pkt_width(sets_p, assoc_p, block_width_p)
+    , localparam cache_data_mem_pkt_width_lp = `bp_cache_data_mem_pkt_width(sets_p, assoc_p, block_width_p, fill_width_p)
     , localparam cache_stat_mem_pkt_width_lp = `bp_cache_stat_mem_pkt_width(sets_p, assoc_p)
 
-    // Block size parameterisations - 
+    // Block size parameterisations -
     , localparam is_blockwidth_512 = (block_width_p == 512)
     , localparam is_blockwidth_256 = (block_width_p == 256)
     , localparam is_blockwidth_128 = (block_width_p == 128)
@@ -45,6 +47,7 @@ module bp_uce
     , input [cache_req_metadata_width_lp-1:0]        cache_req_metadata_i
     , input                                          cache_req_metadata_v_i
     , output logic                                   cache_req_complete_o
+    , output logic                                   cache_req_critical_o
 
     , output logic [cache_tag_mem_pkt_width_lp-1:0]  tag_mem_pkt_o
     , output logic                                   tag_mem_pkt_v_o
@@ -74,7 +77,7 @@ module bp_uce
     );
 
   `declare_bp_me_if(paddr_width_p, cce_block_width_p, lce_id_width_p, lce_assoc_p);
-  `declare_bp_cache_service_if(paddr_width_p, ptag_width_p, sets_p, assoc_p, dword_width_p, block_width_p, cache);
+  `declare_bp_cache_service_if(paddr_width_p, ptag_width_p, sets_p, assoc_p, dword_width_p, block_width_p, fill_width_p, cache);
   `declare_bp_cache_stat_info_s(assoc_p, cache);
 
   `bp_cast_i(bp_cache_req_s, cache_req);
@@ -105,7 +108,7 @@ module bp_uce
      ,.data_i(cache_req_cast_i)
      ,.data_o(cache_req_r)
      );
- 
+
   bp_cache_req_metadata_s cache_req_metadata_r;
   bsg_dff_en_bypass
    #(.width_p($bits(bp_cache_req_metadata_s)))
@@ -250,7 +253,7 @@ module bp_uce
   assign credits_full_o = (credit_count_lo == coh_noc_max_credits_p);
   assign credits_empty_o = (credit_count_lo == 0);
 
-  // We ack mem_resps for uncached stores no matter what, so mem_resp_yumi_lo is for other responses 
+  // We ack mem_resps for uncached stores no matter what, so mem_resp_yumi_lo is for other responses
   logic mem_resp_yumi_lo;
   assign mem_resp_yumi_o = mem_resp_yumi_lo | store_resp_v_li;
   always_comb
@@ -268,6 +271,7 @@ module bp_uce
       stat_mem_pkt_v_o    = '0;
 
       cache_req_complete_o = '0;
+      cache_req_critical_o = '0;
 
       mem_cmd_cast_o   = '0;
       mem_cmd_v_o      = '0;
@@ -333,8 +337,8 @@ module bp_uce
 
                 state_n = (index_done & way_done)
                           ? e_flush_fence
-                          : way_done 
-                            ? e_flush_read 
+                          : way_done
+                            ? e_flush_read
                             : e_flush_scan;
               end
           end
@@ -409,10 +413,10 @@ module bp_uce
               mem_cmd_cast_o.header.payload.lce_id = lce_id_i;
               mem_cmd_v_o = mem_cmd_ready_i;
 
-              state_n = mem_cmd_v_o 
-                        ? cache_req_metadata_r.dirty 
+              state_n = mem_cmd_v_o
+                        ? cache_req_metadata_r.dirty
                           ? e_writeback_read
-                          : e_read_wait 
+                          : e_read_wait
                         : e_send_req;
             end
           else if (uc_load_v_li)
@@ -475,10 +479,12 @@ module bp_uce
             data_mem_pkt_cast_o.index  = mem_resp_cast_i.header.addr[block_offset_width_lp+:index_width_lp];
             data_mem_pkt_cast_o.way_id = mem_resp_cast_i.header.payload.way_id[0+:`BSG_SAFE_CLOG2(assoc_p)];
             data_mem_pkt_cast_o.data   = mem_resp_cast_i.data;
+            data_mem_pkt_cast_o.fill_mask = {assoc_p{1'b1}};
             data_mem_pkt_v_o = load_resp_v_li & data_mem_pkt_ready_i & tag_mem_pkt_ready_i;
 
             cache_req_complete_o = tag_mem_pkt_v_o & data_mem_pkt_v_o;
-            mem_resp_yumi_lo = cache_req_complete_o; 
+            cache_req_critical_o = tag_mem_pkt_v_o & data_mem_pkt_v_o;
+            mem_resp_yumi_lo = cache_req_complete_o;
 
             state_n = cache_req_complete_o ? e_ready : e_read_wait;
           end
@@ -513,4 +519,3 @@ module bp_uce
 ////synopsys translate_off
 
 endmodule
-
