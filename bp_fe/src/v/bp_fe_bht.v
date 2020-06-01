@@ -32,15 +32,14 @@ module bp_fe_bht
    , output                      predict_o
    );
 
-
+  // Three memory
   logic [els_lp-1:0][mem_width_lp-1:0] counter_mem;
-  logic [els_lp-1:0][0:0] history_mem;
-  logic [els_lp-1:0][0:0] last_predict_mem;
+  logic [els_lp-1:0] history_mem;
+  logic [els_lp-1:0] last_predict_mem;
 
   logic [mem_width_lp-1:0] counter_mem_read_data;
   logic [saturation_size_lp-1:0] targeted_counter;
-  logic last_taken_read, last_branch_result;
-  logic history_mem_write_data;
+  logic history_mem_read_data, history_mem_read_data_old, history_mem_write_data;
 
   logic [bht_idx_width_p-1:0] idx_r_r;
   logic r_v_r;
@@ -54,7 +53,7 @@ module bp_fe_bht
 
   always_comb begin
    counter_mem_read_data = counter_mem[idx_r_r];
-   last_taken_read = history_mem[idx_r_r];
+   history_mem_read_data = history_mem[idx_r_r];
   end
 
   bsg_mux #(
@@ -62,11 +61,11 @@ module bp_fe_bht
     ,.els_p(2)
     ) targeted_counter_mux
     (.data_i(counter_mem_read_data)
-     ,.sel_i(last_taken_read)
+     ,.sel_i(history_mem_read_data)
      ,.data_o(targeted_counter)
      );
 
-  assign predict_o = r_v_r ? targeted_counter[1] : `BSG_UNDEFINED_IN_SIM(1'b0);
+  assign predict_o = r_v_r ? targeted_counter[1] : 1'b0;
 
   // store the predict result for updating use
   always_ff @(posedge clk_i) begin
@@ -81,14 +80,16 @@ module bp_fe_bht
   //11: Weakly taken
   //01: Weakly not taken
   //00: Strongly not taken
-  logic [mem_width_lp-1:0] counter_mem_last_data;
+  logic [mem_width_lp-1:0] counter_mem_read_data_old;
   logic [1:0][saturation_size_lp-1:0] counter_mem_write_data;
-  logic [saturation_size_lp-1:0] counter_mem_update, counter_mem_last_data_target;
+  logic [saturation_size_lp-1:0] counter_mem_update_data, counter_mem_read_data_target;
+  logic last_predict_mem_read_data;
+  assign last_predict_mem_read_data = last_predict_mem[idx_w_i];
   // update the history memory with the true result from correctness signal and last prediction
-  assign history_mem_write_data = ~(last_predict_mem[idx_w_i] ^ correct_i);
+  assign history_mem_write_data = last_predict_mem_read_data ^~ correct_i;
   always_ff @(posedge clk_i) begin
     if (reset_i)
-      history_mem <= '{default:1'b0};
+      history_mem <= '{default:1'b1};
     else if (w_v_i)
       history_mem[idx_w_i] <= history_mem_write_data;
   end
@@ -97,22 +98,22 @@ module bp_fe_bht
     .width_p(saturation_size_lp)
     ,.els_p(2)
     ) counter_updating_mux
-    (.data_i(counter_mem_last_data)
-     ,.sel_i(last_branch_result)
-     ,.data_o(counter_mem_last_data_target)
+    (.data_i(counter_mem_read_data_old)
+     ,.sel_i(history_mem_read_data_old)
+     ,.data_o(counter_mem_read_data_target)
      );
 
   always_comb begin
-    last_branch_result = history_mem[idx_w_i];
-    counter_mem_last_data = counter_mem[idx_w_i];
+    history_mem_read_data_old = history_mem[idx_w_i];
+    counter_mem_read_data_old = counter_mem[idx_w_i];
     if (correct_i) begin
-      counter_mem_update = {counter_mem_last_data_target[1], 1'b0};
+      counter_mem_update_data = {counter_mem_read_data_target[1], 1'b0};
     end
     else if (~correct_i) begin
-      counter_mem_update = {counter_mem_last_data_target[1]^counter_mem_last_data_target[0], 1'b1};
+      counter_mem_update_data = {counter_mem_read_data_target[1]^counter_mem_read_data_target[0], 1'b1};
     end
-    counter_mem_write_data[0] =  last_branch_result ? counter_mem_last_data[0] : counter_mem_update;
-    counter_mem_write_data[1] =  last_branch_result ? counter_mem_update : counter_mem_last_data[1];
+    counter_mem_write_data[0] =  history_mem_read_data_old ? counter_mem_read_data_old[0] : counter_mem_update_data;
+    counter_mem_write_data[1] =  history_mem_read_data_old ? counter_mem_update_data : counter_mem_read_data_old[1];
   end
 
   always_ff @(posedge clk_i)  begin
