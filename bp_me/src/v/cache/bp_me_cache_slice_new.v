@@ -48,24 +48,81 @@ module bp_me_cache_slice_new
    , output                                    mem_resp_data_ready_o
    );
 
+  `declare_bp_mem_if(paddr_width_p, cce_block_width_p, lce_id_width_p, lce_assoc_p, cce_mem);
+  bp_cce_mem_msg_s mem_cmd, mem_resp;
+  assign mem_cmd = mem_cmd_i;
+  assign mem_resp_o = mem_resp;
+
+  bp_cce_mem_msg_header_s mem_header_lo;
+  logic [dword_width_p-1:0] mem_data_lo;
+  logic mem_v_lo, mem_ready_li, mem_lock_lo;
+  bp_lite_to_stream
+   #(.bp_params_p(bp_params_p)
+     ,.in_data_width_p(cce_block_width_p)
+     ,.out_data_width_p(dword_width_p)
+     ,.master_p(1)
+     )
+   lite2stream
+    (.clk_i(clk_i)
+     ,.reset_i(reset_i)
+
+     ,.mem_i(mem_cmd_i)
+     ,.mem_v_i(mem_cmd_v_i)
+     ,.mem_ready_o(mem_cmd_ready_o)
+
+     ,.mem_header_o(mem_header_lo)
+     ,.mem_data_o(mem_data_lo)
+     ,.mem_v_o(mem_v_lo)
+     ,.mem_yumi_i(mem_ready_li & mem_v_lo)
+     ,.mem_lock_o(mem_lock_lo)
+     );
+
+  bp_cce_mem_msg_header_s mem_header_li;
+  logic [dword_width_p-1:0] mem_data_li;
+  logic mem_v_li, mem_ready_lo, mem_lock_li;
+  bp_stream_to_lite
+   #(.bp_params_p(bp_params_p)
+     ,.in_data_width_p(dword_width_p)
+     ,.out_data_width_p(cce_block_width_p)
+     ,.master_p(0)
+     )
+   stream2lite
+    (.clk_i(clk_i)
+     ,.reset_i(reset_i)
+
+     ,.mem_header_i(mem_header_li)
+     ,.mem_data_i(mem_data_li)
+     ,.mem_v_i(mem_v_li)
+     ,.mem_ready_o(mem_ready_lo)
+     ,.mem_lock_i(mem_lock_li)
+
+     ,.mem_o(mem_resp_o)
+     ,.mem_v_o(mem_resp_v_o)
+     ,.mem_yumi_i(mem_resp_yumi_i)
+     );
+
   `declare_bsg_cache_pkt_s(paddr_width_p, dword_width_p);
   bsg_cache_pkt_s cache_pkt_li;
   logic cache_pkt_v_li, cache_pkt_ready_lo;
   logic [dword_width_p-1:0] cache_data_lo;
   logic cache_data_v_lo, cache_data_yumi_li;
-  bp_me_cce_to_cache
+  bp_me_cce_to_cache_new
    #(.bp_params_p(bp_params_p))
    cce_to_cache
     (.clk_i(clk_i)
      ,.reset_i(reset_i)
 
-     ,.mem_cmd_i(mem_cmd_i)
-     ,.mem_cmd_v_i(mem_cmd_v_i)
-     ,.mem_cmd_ready_o(mem_cmd_ready_o)
+     ,.mem_cmd_header_i(mem_header_lo)
+     ,.mem_cmd_data_i(mem_data_lo)
+     ,.mem_cmd_v_i(mem_v_lo)
+     ,.mem_cmd_ready_o(mem_ready_li)
+     ,.mem_cmd_lock_i(mem_cmd_lock_lo)
 
-     ,.mem_resp_o(mem_resp_o)
-     ,.mem_resp_v_o(mem_resp_v_o)
-     ,.mem_resp_yumi_i(mem_resp_yumi_i)
+     ,.mem_resp_header_o(mem_header_li)
+     ,.mem_resp_data_o(mem_data_li)
+     ,.mem_resp_v_o(mem_v_li)
+     ,.mem_resp_yumi_i(mem_ready_lo & mem_v_li)
+     ,.mem_resp_lock_o(mem_lock_li)
 
      ,.cache_pkt_o(cache_pkt_li)
      ,.v_o(cache_pkt_v_li)

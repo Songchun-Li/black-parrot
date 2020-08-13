@@ -106,9 +106,9 @@ module bp_me_cce_to_cache_new
   // Mask the ready signal if we're not ready, or the fifo or cache aren't ready
   assign mem_cmd_ready_o = is_ready & mem_cmd_ready_lo & cache_pkt_ready_i;
   wire is_read  = mem_cmd_header.msg_type inside {e_mem_msg_uc_rd, e_mem_msg_rd};
-  wire is_write = mem_cmd_header.msg_type inside {e_mem_msg_uc_rd, e_mem_msg_rd};
-  wire is_uc    = (mem_cmd_header.addr < dram_base_addr_gp);
-  wire is_tagfl = is_uc & ((mem_cmd_header.addr[0+:20] == cache_tagfl_base_addr_gp));
+  wire is_write = mem_cmd_header.msg_type inside {e_mem_msg_uc_wr, e_mem_msg_wr};
+  wire is_csr   = (mem_cmd_header.addr < dram_base_addr_gp);
+  wire is_tagfl = is_csr & ((mem_cmd_header.addr[0+:20] == cache_tagfl_base_addr_gp));
   wire [paddr_width_p-1:0] tagfl_addr = {mem_cmd_data_i[0+:lg_sets_lp+lg_ways_lp], block_offset_width_lp'(0)};
   wire [paddr_width_p-1:0] cmd_addr   = mem_cmd_header.addr;
   assign mem_resp_data = cache_data_i;
