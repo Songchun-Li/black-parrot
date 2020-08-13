@@ -66,7 +66,7 @@ module bp_me_cache_slice_new
     (.clk_i(clk_i)
      ,.reset_i(reset_i)
 
-     ,.mem_i(mem_cmd_i)
+     ,.mem_i(mem_cmd)
      ,.mem_v_i(mem_cmd_v_i)
      ,.mem_ready_o(mem_cmd_ready_o)
 
@@ -92,11 +92,11 @@ module bp_me_cache_slice_new
 
      ,.mem_header_i(mem_header_li)
      ,.mem_data_i(mem_data_li)
-     ,.mem_v_i(mem_v_li)
+     ,.mem_v_i(mem_ready_lo & mem_v_li)
      ,.mem_ready_o(mem_ready_lo)
      ,.mem_lock_i(mem_lock_li)
 
-     ,.mem_o(mem_resp_o)
+     ,.mem_o(mem_resp)
      ,.mem_v_o(mem_resp_v_o)
      ,.mem_yumi_i(mem_resp_yumi_i)
      );
@@ -116,7 +116,7 @@ module bp_me_cache_slice_new
      ,.mem_cmd_data_i(mem_data_lo)
      ,.mem_cmd_v_i(mem_v_lo)
      ,.mem_cmd_ready_o(mem_ready_li)
-     ,.mem_cmd_lock_i(mem_cmd_lock_lo)
+     ,.mem_cmd_lock_i(mem_lock_lo)
 
      ,.mem_resp_header_o(mem_header_li)
      ,.mem_resp_data_o(mem_data_li)
@@ -125,12 +125,12 @@ module bp_me_cache_slice_new
      ,.mem_resp_lock_o(mem_lock_li)
 
      ,.cache_pkt_o(cache_pkt_li)
-     ,.v_o(cache_pkt_v_li)
-     ,.ready_i(cache_pkt_ready_lo)
+     ,.cache_pkt_v_o(cache_pkt_v_li)
+     ,.cache_pkt_ready_i(cache_pkt_ready_lo)
 
-     ,.data_i(cache_data_lo)
-     ,.v_i(cache_data_v_lo)
-     ,.yumi_o(cache_data_yumi_li)
+     ,.cache_data_i(cache_data_lo)
+     ,.cache_v_i(cache_data_v_lo)
+     ,.cache_yumi_o(cache_data_yumi_li)
      );
 
   `declare_bsg_cache_dma_pkt_s(paddr_width_p);

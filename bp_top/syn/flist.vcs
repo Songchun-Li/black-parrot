@@ -262,6 +262,7 @@ $BP_ME_DIR/src/v/cce/bp_cce_wrapper.v
 $BP_ME_DIR/src/v/cce/bp_cce_loopback.v
 $BP_ME_DIR/src/v/cce/bp_uce.v
 $BP_ME_DIR/src/v/wormhole/bp_lite_to_stream.v
+$BP_ME_DIR/src/v/wormhole/bp_stream_to_lite.v
 $BP_ME_DIR/src/v/wormhole/bp_me_addr_to_cce_id.v
 $BP_ME_DIR/src/v/wormhole/bp_me_cce_id_to_cord.v
 $BP_ME_DIR/src/v/wormhole/bp_me_cce_to_mem_link_bidir.v

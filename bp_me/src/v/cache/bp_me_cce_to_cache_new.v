@@ -96,7 +96,7 @@ module bp_me_cce_to_cache_new
      ,.reset_i(reset_i)
 
      ,.data_i(mem_cmd_header)
-     ,.v_i(mem_cmd_v_li)
+     ,.v_i(mem_cmd_v_i)
      ,.ready_o(mem_cmd_ready_lo)
 
      ,.data_o(mem_resp_header)
@@ -120,15 +120,17 @@ module bp_me_cce_to_cache_new
     begin
       cache_pkt     = '0;
       cache_pkt_v_o = 1'b0;
-
-      mem_cmd_v_li    = 1'b0;
+      cache_yumi_o  = 1'b0;
       
+      mem_resp_v_o    = 1'b0;
+      mem_resp_lock_o = 1'b0;
+
       tagst_sent_n = tagst_sent_r;
       tagst_recv_n = tagst_recv_r;
       cmd_state_n  = cmd_state_r;
 
       case (cmd_state_r)
-        e_cmd_reset: cmd_state_n = e_cmd_clear;
+        e_cmd_reset: begin cmd_state_n = e_cmd_clear; end
         e_cmd_clear:
           begin
             cache_pkt.opcode = TAGST;
@@ -138,10 +140,12 @@ module bp_me_cce_to_cache_new
               tagst_sent_r[0+:lg_sets_lp+lg_ways_lp],
               {(block_offset_width_lp){1'b0}}
             };
+            cache_pkt.mask = '1;
 
             cache_pkt_v_o = cache_pkt_ready_i & (tagst_sent_r != (l2_assoc_p*l2_sets_p));
             tagst_sent_n = tagst_sent_r + cache_pkt_v_o;
-            tagst_recv_n = tagst_recv_r + cache_v_i;
+            cache_yumi_o = cache_v_i;
+            tagst_recv_n = tagst_recv_r + cache_yumi_o;
             cmd_state_n = (tagst_recv_r == l2_assoc_p*l2_sets_p) ? e_cmd_ready : e_cmd_clear;
           end
         e_cmd_ready:
@@ -152,18 +156,20 @@ module bp_me_cce_to_cache_new
               {1'b0, e_mem_msg_size_2}: cache_pkt.opcode = is_read ? LH : SH;
               {1'b0, e_mem_msg_size_4}: cache_pkt.opcode = is_read ? LW : SH;
               {1'b0, 3'b???          }: cache_pkt.opcode = is_read ? LD : SD;
+              default: cache_pkt.opcode = TAGFL;
             endcase
 
             cache_pkt.addr = is_tagfl ? tagfl_addr : cmd_addr;
             cache_pkt.data = mem_cmd_data_i;
             // This mask is only used for the LM/SM operations for >64 bit mask operations
             cache_pkt.mask = '1;
-            cache_pkt_v_o  = cache_pkt_ready_i;
+            cache_pkt_v_o  = mem_cmd_v_i;
 
             mem_resp_v_o    = mem_resp_v_lo & cache_v_i;
             mem_resp_lock_o = mem_resp_v_lo;
             cache_yumi_o    = mem_resp_yumi_i;
           end
+        default: begin end
       endcase
     end
   
