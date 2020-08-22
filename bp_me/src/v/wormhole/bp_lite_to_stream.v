@@ -131,11 +131,11 @@ module bp_lite_to_stream
 
   always_ff @(negedge clk_i)
     begin
-     // if (mem_ready_o & mem_v_i)
-     //   $display("[%t] Msg received: %p", $time, mem_cast_i);
+      //if (mem_ready_o & mem_v_i)
+      //  $display("[%t] Msg received: %p", $time, mem_cast_i);
 
-     // if (mem_yumi_i)
-     //   $display("[%t] Stream sent: %p %x CNT: %x", $time, mem_header_cast_o, mem_data_o, data_cnt);
+      //if (mem_yumi_i)
+      //  $display("[%t] Stream sent: %p %x CNT: %x", $time, mem_header_cast_o, mem_data_o, data_cnt);
     end
   //synopsys translate_on
 

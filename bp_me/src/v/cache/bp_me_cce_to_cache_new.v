@@ -165,7 +165,7 @@ module bp_me_cce_to_cache_new
               {1'b1, 3'b???          }: cache_pkt.opcode = TAGFL;
               {1'b0, e_mem_msg_size_1}: cache_pkt.opcode = is_read ? LB : SB;
               {1'b0, e_mem_msg_size_2}: cache_pkt.opcode = is_read ? LH : SH;
-              {1'b0, e_mem_msg_size_4}: cache_pkt.opcode = is_read ? LW : SH;
+              {1'b0, e_mem_msg_size_4}: cache_pkt.opcode = is_read ? LW : SW;
               {1'b0, 3'b???          }: cache_pkt.opcode = is_read ? LD : SD;
               default: cache_pkt.opcode = TAGFL;
             endcase
@@ -196,7 +196,7 @@ module bp_me_cce_to_cache_new
         e_cmd_stream:
           begin
             cache_pkt.opcode = LD;
-            cache_pkt.addr = mem_cmd_header_lo.addr + (cmd_cnt_n << 3);
+            cache_pkt.addr = mem_cmd_header_lo.addr + (cmd_cnt_r << 3);
             cache_pkt.mask = '1;
             cache_pkt_v_o = cache_pkt_ready_i;
 
@@ -204,7 +204,7 @@ module bp_me_cce_to_cache_new
 
             // Override address with autoincrement
             mem_resp_header_li = mem_cmd_header_lo;
-            mem_resp_header_li.addr = mem_cmd_header_lo.addr + (cmd_cnt_n << 3);
+            mem_resp_header_li.addr = mem_cmd_header_lo.addr + (cmd_cnt_r << 3);
             mem_resp_v_li = cache_pkt_v_o;
 
             mem_cmd_yumi_li = cache_pkt_v_o & (cmd_cnt_r == max_cnt_r);
