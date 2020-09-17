@@ -102,8 +102,10 @@ module bp_unicore
 
   bp_bedrock_uce_mem_msg_s [2:0] proc_cmd_lo;
   logic [2:0] proc_cmd_v_lo, proc_cmd_ready_li;
+
   bp_bedrock_uce_mem_msg_s [2:0] proc_resp_li;
-  logic [2:0] proc_resp_v_li, proc_resp_yumi_lo;
+  logic [2:0] proc_resp_v_li, proc_resp_ready_lo;
+  logic [2:0] proc_cmd_lock_lo, proc_resp_lock_li;
 
   bp_bedrock_uce_mem_msg_s cfg_cmd_li;
   logic cfg_cmd_v_li, cfg_cmd_ready_lo;
@@ -118,7 +120,7 @@ module bp_unicore
   bp_bedrock_uce_mem_msg_s cache_cmd_li;
   logic cache_cmd_v_li, cache_cmd_ready_lo;
   bp_bedrock_uce_mem_msg_s cache_resp_lo;
-  logic cache_resp_v_lo, cache_resp_yumi_li;
+  logic cache_resp_v_lo, cache_resp_yumi_li, cache_resp_lock_lo;
 
   bp_bedrock_uce_mem_msg_s loopback_cmd_li;
   logic loopback_cmd_v_li, loopback_cmd_ready_lo;
@@ -264,13 +266,17 @@ module bp_unicore
      ,.credits_full_o(credits_full_li[1])
      ,.credits_empty_o(credits_empty_li[1])
 
-     ,.mem_cmd_o(proc_cmd_lo[1])
+     ,.mem_cmd_header_o(proc_cmd_lo[1].header)
+     ,.mem_cmd_data_o(proc_cmd_lo[1].data)
+     ,.mem_cmd_lock_o(proc_cmd_lock_lo[1])
      ,.mem_cmd_v_o(proc_cmd_v_lo[1])
      ,.mem_cmd_ready_i(proc_cmd_ready_li[1])
 
-     ,.mem_resp_i(proc_resp_li[1])
+     ,.mem_resp_header_i(proc_resp_li[1].header)
+     ,.mem_resp_data_i(proc_resp_li[1].data)
+     ,.mem_resp_lock_i(proc_resp_lock_li[1])
      ,.mem_resp_v_i(proc_resp_v_li[1])
-     ,.mem_resp_yumi_o(proc_resp_yumi_lo[1])
+     ,.mem_resp_ready_o(proc_resp_ready_lo[1])
      );
 
   bp_uce
@@ -314,13 +320,17 @@ module bp_unicore
      ,.credits_full_o(credits_full_li[0])
      ,.credits_empty_o(credits_empty_li[0])
 
-     ,.mem_cmd_o(proc_cmd_lo[0])
+     ,.mem_cmd_header_o(proc_cmd_lo[0].header)
+     ,.mem_cmd_data_o(proc_cmd_lo[0].data)
+     ,.mem_cmd_lock_o(proc_cmd_lock_lo[0])
      ,.mem_cmd_v_o(proc_cmd_v_lo[0])
      ,.mem_cmd_ready_i(proc_cmd_ready_li[0])
 
-     ,.mem_resp_i(proc_resp_li[0])
+     ,.mem_resp_header_i(proc_resp_li[0].header)
+     ,.mem_resp_data_i(proc_resp_li[0].data)
+     ,.mem_resp_lock_i(proc_resp_lock_li[0])
      ,.mem_resp_v_i(proc_resp_v_li[0])
-     ,.mem_resp_yumi_o(proc_resp_yumi_lo[0])
+     ,.mem_resp_ready_o(proc_resp_ready_lo[0])
      );
 
   bp_clint_slice
@@ -372,62 +382,68 @@ module bp_unicore
   assign proc_cmd_lo[2] = io_cmd_i[0+:bp_bedrock_uce_mem_msg_width_lp];
   assign proc_cmd_v_lo[2] = io_cmd_v_i;
   assign io_cmd_yumi_o = proc_cmd_ready_li[2] & proc_cmd_v_lo[2];
-
-  assign io_resp_o = bp_bedrock_uce_mem_msg_width_lp'(proc_resp_li[2]); 
-  assign io_resp_v_o = proc_resp_v_li[2];
-  assign proc_resp_yumi_lo[2] = io_resp_ready_i & io_resp_v_o;
+  assign proc_cmd_lock_lo[2] = '0;
 
   // Command/response FIFOs for timing and helpfulness
   bp_bedrock_uce_mem_msg_s [2:0] cmd_fifo_lo;
-  logic [2:0] cmd_fifo_v_lo, cmd_fifo_yumi_li;
-  
-  bp_bedrock_uce_mem_msg_s [2:0] resp_fifo_li;
-  logic [2:0] resp_fifo_v_li, resp_fifo_ready_lo;
-
+  logic [2:0] cmd_fifo_lock_lo, cmd_fifo_v_lo, cmd_fifo_yumi_li;
   for (genvar i = 0; i < 3; i++)
     begin : fifo
       bsg_two_fifo
-       #(.width_p($bits(bp_bedrock_uce_mem_msg_s)))
+       #(.width_p($bits(bp_bedrock_uce_mem_msg_s)+1))
        cmd_fifo
         (.clk_i(clk_i)
          ,.reset_i(reset_i)
 
-         ,.data_i(proc_cmd_lo[i])
+         ,.data_i({proc_cmd_lock_lo[i], proc_cmd_lo[i]})
          ,.v_i(proc_cmd_v_lo[i])
          ,.ready_o(proc_cmd_ready_li[i])
 
-         ,.data_o(cmd_fifo_lo[i])
+         ,.data_o({cmd_fifo_lock_lo[i], cmd_fifo_lo[i]})
          ,.v_o(cmd_fifo_v_lo[i])
          ,.yumi_i(cmd_fifo_yumi_li[i])
          );
-
-      bsg_two_fifo
-       #(.width_p($bits(bp_bedrock_uce_mem_msg_s)))
-       resp_fifo
-        (.clk_i(clk_i)
-         ,.reset_i(reset_i)
-
-         ,.data_i(resp_fifo_li[i])
-         ,.v_i(resp_fifo_v_li[i])
-         ,.ready_o(resp_fifo_ready_lo[i])
-
-         ,.data_o(proc_resp_li[i])
-         ,.v_o(proc_resp_v_li[i])
-         ,.yumi_i(proc_resp_yumi_lo[i])
-         );
     end
+
+    // resp fifo for I/O only
+    bp_bedrock_uce_mem_msg_s io_resp_lo;
+    logic io_resp_ready_lo;
+    bsg_two_fifo
+     #(.width_p($bits(bp_bedrock_uce_mem_msg_s)))
+     io_resp_fifo
+      (.clk_i(clk_i)
+      ,.reset_i(reset_i)
+
+      ,.data_i(proc_resp_li[2])
+      ,.v_i(proc_resp_v_li[2])
+      ,.ready_o(proc_resp_ready_lo[2])
+
+      ,.data_o(io_resp_lo) 
+      ,.v_o(io_resp_v_o)
+      ,.yumi_i(io_resp_ready_i & io_resp_v_o)
+      );
+    assign io_resp_o = bp_bedrock_uce_mem_msg_width_lp'(io_resp_lo);
+    wire io_resp_lock_unused = proc_resp_lock_li[2] & proc_resp_v_li[2]; 
 
   // Command arbitration logic
   // This is suboptimal for performance, because a blocked I/O channel will put backpressure on the
   //   cache.
   wire cmd_arb_ready_li = &{cfg_cmd_ready_lo, clint_cmd_ready_lo, io_cmd_ready_i, cache_cmd_ready_lo, loopback_cmd_ready_lo};
-  bsg_arb_fixed
-   #(.inputs_p(3), .lo_to_hi_p(0))
-   cmd_arbiter
-    (.ready_i(cmd_arb_ready_li)
-     ,.reqs_i(cmd_fifo_v_lo)
-     ,.grants_o(cmd_fifo_yumi_li)
-     );
+  logic cmd_selected_lock_li;
+  bsg_locking_arb_fixed_new 
+   #(.inputs_p(3)
+   ,.unlock_type_p(0)
+   ,.lo_to_hi_p(0))
+   cmd_locking_arb_fixed
+    (.clk_i(clk_i)
+    ,.reset_i(reset_i)
+    ,.ready_i(cmd_arb_ready_li)
+
+    ,.switch_lock_i(cmd_fifo_lock_lo & cmd_fifo_v_lo)
+    ,.reqs_i(cmd_fifo_v_lo)
+    ,.grants_o(cmd_fifo_yumi_li)
+    ,.lock_o(cmd_selected_lock_li)
+    ); 
 
   bp_bedrock_uce_mem_msg_s cmd_fifo_selected_lo;
   bsg_mux_one_hot
@@ -444,31 +460,40 @@ module bp_unicore
   //   arbitrary orders, especially when considering CLINT or I/O responses
   // This is also suboptimal. Theoretically, we could dequeue into each fifo at once, but this
   //   would require more complex arbitration logic
-  wire resp_arb_ready_li = &resp_fifo_ready_lo;
-  bsg_arb_fixed
-   #(.inputs_p(5), .lo_to_hi_p(0))
-   resp_arbiter
-    (.ready_i(resp_arb_ready_li)
-     ,.reqs_i({loopback_resp_v_lo, cache_resp_v_lo, io_resp_v_i, clint_resp_v_lo, cfg_resp_v_lo})
-     ,.grants_o({loopback_resp_yumi_li, cache_resp_yumi_li, io_resp_yumi_o, clint_resp_yumi_li, cfg_resp_yumi_li})
-     );
-    
+  wire resp_arb_ready_li = &proc_resp_ready_lo;
+  logic resp_selected_lock_lo;
+  bsg_locking_arb_fixed_new 
+   #(.inputs_p(5)
+   ,.unlock_type_p(0)
+   ,.lo_to_hi_p(0))
+   resp_locking_arb_fixed
+    (.clk_i(clk_i)
+    ,.reset_i(reset_i)
+    ,.ready_i(resp_arb_ready_li)
+
+    ,.switch_lock_i({1'b0, cache_resp_lock_lo, 3'b000}) // Only L2 sends the locking signal
+    ,.reqs_i({loopback_resp_v_lo, cache_resp_v_lo, io_resp_v_i, clint_resp_v_lo, cfg_resp_v_lo})
+    ,.grants_o({loopback_resp_yumi_li, cache_resp_yumi_li, io_resp_yumi_o, clint_resp_yumi_li, cfg_resp_yumi_li})
+    ,.lock_o(resp_selected_lock_lo)
+    ); 
+
   for (genvar i = 0; i < 3; i++)
     begin : resp_match
-      bp_bedrock_uce_mem_msg_s resp_fifo_selected_li;
-      bp_bedrock_uce_mem_payload_s resp_fifo_selected_payload_li;
-      assign resp_fifo_selected_payload_li = resp_fifo_selected_li.header.payload;
+      bp_bedrock_uce_mem_msg_s proc_resp_selected_li;
+      bp_bedrock_uce_mem_payload_s proc_resp_selected_payload_li;
+      assign proc_resp_selected_payload_li = proc_resp_selected_li.header.payload;
       bsg_mux_one_hot
        #(.width_p($bits(bp_bedrock_uce_mem_msg_s)), .els_p(5))
        resp_select
         (.data_i({loopback_resp_lo, cache_resp_lo, io_resp_i, clint_resp_lo, cfg_resp_lo})
          ,.sel_one_hot_i({loopback_resp_yumi_li, cache_resp_yumi_li, io_resp_yumi_o, clint_resp_yumi_li, cfg_resp_yumi_li})
-         ,.data_o(resp_fifo_selected_li)
+         ,.data_o(proc_resp_selected_li)
          );
       wire resp_selected_v_li = |{loopback_resp_yumi_li, cache_resp_yumi_li, io_resp_yumi_o, clint_resp_yumi_li, cfg_resp_yumi_li};
 
-      assign resp_fifo_v_li[i] = resp_selected_v_li & (resp_fifo_selected_payload_li.lce_id == i);
-      assign resp_fifo_li[i] = resp_fifo_selected_li;
+      assign proc_resp_v_li[i] = resp_selected_v_li & (proc_resp_selected_payload_li.lce_id == i);
+      assign proc_resp_li[i] = proc_resp_selected_li;
+      assign proc_resp_lock_li[i] = resp_selected_lock_lo;
     end
 
   /* TODO: Extract local memory map to module */
@@ -486,6 +511,7 @@ module bp_unicore
   assign io_cmd_v_o        = is_io_cmd    & |cmd_fifo_yumi_li;
   assign cache_cmd_v_li    = is_cache_cmd & |cmd_fifo_yumi_li;
   assign loopback_cmd_v_li = is_loopback_cmd & |cmd_fifo_yumi_li;
+  assign cache_cmd_lock_li = cache_cmd_v_li & cmd_selected_lock_li; // Only L2 will used the locking signal
 
   bp_cce_loopback
    #(.bp_params_p(bp_params_p))
@@ -505,41 +531,46 @@ module bp_unicore
   if (l2_en_p)
     begin : l2
       logic mem_resp_header_ready_lo, mem_resp_data_ready_lo;
-      bp_me_cache_slice
-       #(.bp_params_p(bp_params_p))
+      bp_me_cache_slice_new
+       #(.bp_params_p(bp_params_p)
+       ,.cache_data_width_p(uce_mem_data_width_lp)) //TODO
        l2s
         (.clk_i(clk_i)
-         ,.reset_i(reset_i)
+        ,.reset_i(reset_i)
 
-         ,.mem_cmd_i(cache_cmd_li)
-         ,.mem_cmd_v_i(cache_cmd_v_li)
-         ,.mem_cmd_ready_o(cache_cmd_ready_lo)
+        ,.mem_cmd_header_i(cache_cmd_li.header)
+        ,.mem_cmd_data_i(cache_cmd_li.data)
+        ,.mem_cmd_lock_i(cache_cmd_lock_li)
+        ,.mem_cmd_v_i(cache_cmd_v_li)
+        ,.mem_cmd_ready_o(cache_cmd_ready_lo)
 
-         ,.mem_resp_o(cache_resp_lo)
-         ,.mem_resp_v_o(cache_resp_v_lo)
-         ,.mem_resp_yumi_i(cache_resp_yumi_li)
+        ,.mem_resp_header_o(cache_resp_lo.header)
+        ,.mem_resp_data_o(cache_resp_lo.data)
+        ,.mem_resp_lock_o(cache_resp_lock_lo)
+        ,.mem_resp_v_o(cache_resp_v_lo)
+        ,.mem_resp_yumi_i(cache_resp_yumi_li)
 
-         ,.mem_cmd_header_o(mem_cmd_header_o)
-         ,.mem_cmd_header_v_o(mem_cmd_header_v_o)
-         ,.mem_cmd_header_yumi_i(mem_cmd_header_ready_i & mem_cmd_header_v_o)
+        ,.mem_cmd_header_o(mem_cmd_header_o)
+        ,.mem_cmd_header_v_o(mem_cmd_header_v_o)
+        ,.mem_cmd_header_yumi_i(mem_cmd_header_ready_i & mem_cmd_header_v_o)
 
-         ,.mem_cmd_data_o(mem_cmd_data_o)
-         ,.mem_cmd_data_v_o(mem_cmd_data_v_o)
-         ,.mem_cmd_data_yumi_i(mem_cmd_data_ready_i & mem_cmd_data_v_o)
+        ,.mem_cmd_data_o(mem_cmd_data_o)
+        ,.mem_cmd_data_v_o(mem_cmd_data_v_o)
+        ,.mem_cmd_data_yumi_i(mem_cmd_data_ready_i & mem_cmd_data_v_o)
 
-         ,.mem_resp_header_i(mem_resp_header_i)
-         ,.mem_resp_header_v_i(mem_resp_header_v_i)
-         ,.mem_resp_header_ready_o(mem_resp_header_ready_lo)
+        ,.mem_resp_header_i(mem_resp_header_i)
+        ,.mem_resp_header_v_i(mem_resp_header_v_i)
+        ,.mem_resp_header_ready_o(mem_resp_header_ready_lo)
 
-         ,.mem_resp_data_i(mem_resp_data_i)
-         ,.mem_resp_data_v_i(mem_resp_data_v_i)
-         ,.mem_resp_data_ready_o(mem_resp_data_ready_lo)
-         );
+        ,.mem_resp_data_i(mem_resp_data_i)
+        ,.mem_resp_data_v_i(mem_resp_data_v_i)
+        ,.mem_resp_data_ready_o(mem_resp_data_ready_lo)
+        );
       assign mem_resp_header_yumi_o = mem_resp_header_ready_lo & mem_resp_header_v_i;
       assign mem_resp_data_yumi_o = mem_resp_data_ready_lo & mem_resp_data_v_i;
     end
   else
-    begin : no_l2
+    begin : no_l2 // streamt_to_burst pending
       bp_lite_to_burst
        #(.bp_params_p(bp_params_p)
          ,.in_data_width_p(cce_block_width_p)
@@ -590,4 +621,72 @@ module bp_unicore
        assign mem_resp_data_yumi_o = mem_resp_data_ready_lo & mem_resp_data_v_i;
     end
 
+endmodule
+
+module bsg_locking_arb_fixed_new #( parameter inputs_p="inv"
+                                 , parameter unlock_type_p = 0
+                                 , parameter lo_to_hi_p=0
+                                 , parameter num_locks_p = (unlock_type_p == 0) ? inputs_p : 1
+                                 )
+  ( input   clk_i
+  , input   reset_i
+  , input   ready_i
+
+  , input        [num_locks_p-1:0] switch_lock_i
+
+  , input        [inputs_p-1:0] reqs_i
+  , output logic [inputs_p-1:0] grants_o
+
+  , output logic lock_o
+  );  
+
+  wire [inputs_p-1:0] not_req_mask_r, req_mask_r;
+  wire unlock;  
+  
+  if (unlock_type_p == 0) // Implicit operating mode
+    begin
+      wire is_locked = |not_req_mask_r;
+      wire lock_onlocked_lo, lock_selected_lo;
+      bsg_mux_one_hot #(.width_p(1) ,.els_p(inputs_p) )
+      lock_onlocked_mux
+      (.data_i(switch_lock_i)
+        ,.sel_one_hot_i(req_mask_r)
+        ,.data_o(lock_onlocked_lo)
+        );
+      // unlock when the lock input on the locked channel is low
+      assign unlock = is_locked & ~lock_onlocked_lo;
+
+      bsg_mux_one_hot #(.width_p(1) ,.els_p(inputs_p) )
+      lock_output_mux
+        (.data_i(switch_lock_i)
+        ,.sel_one_hot_i(grants_o)
+        ,.data_o(lock_selected_lo)
+        );
+      // The lock_i can be passed to lock_o at the same cycle
+      assign lock_o = (is_locked) ? lock_onlocked_lo : lock_selected_lo;
+    end
+  else  // Explicit operating mode
+    begin
+      assign unlock = switch_lock_i;
+      assign lock_o = 1'b0;
+    end
+
+  bsg_dff_reset_en #( .width_p(inputs_p) )
+    req_words_reg
+      ( .clk_i  ( clk_i )
+      , .reset_i( reset_i | unlock ) 
+      , .en_i   ( (&req_mask_r) & (|grants_o) ) // update the lock when it is not locked & a req is granted
+      , .data_i ( ~grants_o )
+      , .data_o ( not_req_mask_r )
+      );
+
+  assign req_mask_r = ~not_req_mask_r;
+
+  bsg_arb_fixed #( .inputs_p(inputs_p), .lo_to_hi_p(lo_to_hi_p) )
+    fixed_arb
+      ( .ready_i ( ready_i )
+      , .reqs_i  ( reqs_i & req_mask_r )
+      , .grants_o( grants_o )
+      );  
+      
 endmodule
