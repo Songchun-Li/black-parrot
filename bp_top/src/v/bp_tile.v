@@ -553,7 +553,7 @@ for (genvar i = 0; i < 2; i++)
       logic cache_resp_header_v_li, cache_resp_header_ready_lo;
       logic [dword_width_p-1:0] cache_resp_data_li;
       logic cache_resp_data_v_li, cache_resp_data_ready_lo;
-      bp_me_cache_slice_new
+      bp_me_cache_slice
        #(.bp_params_p(bp_params_p))
        l2s
         (.clk_i(clk_i)
@@ -698,10 +698,6 @@ for (genvar i = 0; i < 2; i++)
          ,.cmd_link_o(mem_cmd_link_cast_o)
          ,.resp_link_i(mem_resp_link_cast_i)
          );
-<<<<<<< HEAD
-=======
-
->>>>>>> Using wormhole stream for cache dma
     end
 
   bp_cce_loopback
