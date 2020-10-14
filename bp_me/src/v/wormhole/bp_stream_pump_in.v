@@ -10,6 +10,8 @@ module bp_stream_pump_in
    , parameter stream_data_width_p = dword_width_p
    , parameter block_width_p = cce_block_width_p
 
+   // Bitmask which determines which message types have a data payload
+   // Constructed as (1 << e_payload_msg1 | 1 << e_payload_msg2)
    , parameter payload_mask_p = 0
 
    `declare_bp_bedrock_mem_if_widths(paddr_width_p, stream_data_width_p, lce_id_width_p, lce_assoc_p, xce)
@@ -126,6 +128,7 @@ module bp_stream_pump_in
           end
         e_single:
           begin
+            // handle message size < stream_data_width_p & write response w/o data payload
             fsm_header_cast_o = mem_header_lo;
             fsm_data_o = mem_data_lo;
             fsm_v_o = mem_v_lo;
@@ -138,6 +141,7 @@ module bp_stream_pump_in
           end
         e_stream:
           begin
+            // handle message size > stream_data_width_p w/ data payload or commands reading more than data than stream_data_width_p
             fsm_header_cast_o = mem_header_lo;
             fsm_header_cast_o.addr[0+:block_offset_width_lp] = critical_addr_r; // keep the address to be the critical word address
             fsm_data_o = mem_data_lo;
