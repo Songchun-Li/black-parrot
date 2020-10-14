@@ -9,12 +9,8 @@ module bp_stream_pump_in
    
    , parameter stream_data_width_p = dword_width_p
    , parameter block_width_p = cce_block_width_p
-   // The way it handles block load/store
-   // 1 : master: read:  receives N sub-block load responses from stream side and sends N sub-blocks of data to FSM together with corresponding address
-   //             write: receives 1 block store response from stream side and sends the only 1 header to the FSM
-   // 0 : client: read:  decodes the only 1 block load command from the stream side into N sub-block addresses, and sents them to the cce_to_cache FSM
-   //             write: receives N sub-blocks store command from stream side, and sends N sub-blocks of data to FSM together with corresponding address
-   , parameter logic master_p = 1
+
+   , parameter payload_mask_p = 0
 
    `declare_bp_bedrock_mem_if_widths(paddr_width_p, stream_data_width_p, lce_id_width_p, lce_assoc_p, xce)
    , localparam block_offset_width_lp = `BSG_SAFE_CLOG2(block_width_p >> 3)
@@ -49,7 +45,7 @@ module bp_stream_pump_in
   
   `bp_cast_o(bp_bedrock_xce_mem_msg_header_s, fsm_header);
 
-  enum logic [1:0] {e_reset, e_single, e_pass_stream, e_decode_stream} state_n, state_r;
+  enum logic [1:0] {e_reset, e_single, e_stream} state_n, state_r;
 
   bp_bedrock_xce_mem_msg_header_s mem_header_lo;
   logic [stream_data_width_p-1:0] mem_data_lo;
@@ -72,6 +68,7 @@ module bp_stream_pump_in
 
   wire is_read_op  = mem_header_lo.msg_type inside {e_bedrock_mem_uc_rd, e_bedrock_mem_rd};
   wire is_write_op = mem_header_lo.msg_type inside {e_bedrock_mem_uc_wr, e_bedrock_mem_wr};
+  wire has_data = payload_mask_p[mem_header_lo.msg_type];
   wire [data_len_width_lp-1:0] num_stream = `BSG_MAX((1'b1 << mem_header_lo.size) / (stream_data_width_p / 8), 1'b1);
   wire single_data_beat = (num_stream == data_len_width_lp'(1));
   
@@ -97,10 +94,6 @@ module bp_stream_pump_in
 
   logic [block_offset_width_lp-1:0] critical_addr, critical_addr_r;
   assign critical_addr = mem_header_lo.addr[0+:block_offset_width_lp];
-
-  // For debugging
-  wire is_decode_stream = state_r inside {e_decode_stream};
-  wire is_pass_stream = state_r inside {e_pass_stream};
 
   // store this addr for stream state
   bsg_dff_en 
@@ -137,29 +130,13 @@ module bp_stream_pump_in
             fsm_data_o = mem_data_lo;
             fsm_v_o = mem_v_lo;
 
-            if (master_p)
-              begin
-                //at master side
-                new_o = mem_lock_lo & (is_read_op & ~single_data_beat) & fsm_yumi_i;
-                cnt_up = new_o;
-                mem_yumi_li = ~new_o & fsm_yumi_i;
-                done_o = single_data_beat & fsm_yumi_i; // used to send credits return
-                state_n = new_o ? e_pass_stream : e_single;
-              end
-            else
-              begin
-                // at client side:
-                new_o = ~single_data_beat & fsm_yumi_i;
-                cnt_up = new_o;
-                mem_yumi_li = ~(is_read_op & ~single_data_beat) & fsm_yumi_i;
-                state_n = new_o 
-                          ? (is_read_op & ~single_data_beat) 
-                            ? e_decode_stream 
-                            : e_pass_stream
-                          : e_single;
-              end
+            mem_yumi_li = ~(is_read_op & ~mem_lock_lo & ~has_data & ~single_data_beat) & fsm_yumi_i;
+            new_o = ~single_data_beat & ~(is_write_op & ~has_data) & fsm_yumi_i; 
+            done_o = fsm_yumi_i & ~new_o; // used for UCE to send credits return
+            cnt_up = new_o;
+            state_n = new_o ? e_stream : e_single;
           end
-        e_pass_stream:
+        e_stream:
           begin
             fsm_header_cast_o = mem_header_lo;
             fsm_header_cast_o.addr[0+:block_offset_width_lp] = critical_addr_r; // keep the address to be the critical word address
@@ -167,29 +144,13 @@ module bp_stream_pump_in
             fsm_v_o = mem_v_lo;
 
             fsm_addr_o = { mem_header_lo.addr[paddr_width_p-1:stream_offset_width_lp+data_len_width_lp]
-                            , cnt_o
-                            , mem_header_lo.addr[0+:stream_offset_width_lp]};
+                         , cnt_o
+                         , mem_header_lo.addr[0+:stream_offset_width_lp]};
 
             cnt_up = fsm_yumi_i;
-            mem_yumi_li = fsm_yumi_i;
             done_o = is_last_cnt & fsm_yumi_i;
-            state_n = done_o ? e_single : e_pass_stream;
-          end
-        e_decode_stream:
-          begin
-            // decode 1 packet into n packets for read cmd at the client side
-            fsm_header_cast_o = mem_header_lo;
-            fsm_data_o = mem_data_lo;
-            fsm_v_o = mem_v_lo;
-
-            fsm_addr_o = { mem_header_lo.addr[paddr_width_p-1:stream_offset_width_lp+data_len_width_lp]
-                            , cnt_o
-                            , mem_header_lo.addr[0+:stream_offset_width_lp]};
-            cnt_up = fsm_yumi_i;
-            
-            done_o = is_last_cnt & fsm_yumi_i;
-            mem_yumi_li = done_o; //yumi when it is done;
-            state_n = done_o ? e_single : e_decode_stream;
+            mem_yumi_li = (is_read_op & ~mem_lock_lo & ~has_data) ? done_o : fsm_yumi_i;
+            state_n = done_o ? e_single : e_stream;
           end
       endcase
     end

@@ -9,12 +9,8 @@ module bp_stream_pump_out
 
    , parameter stream_data_width_p = dword_width_p
    , parameter block_width_p = cce_block_width_p
-   // The way it handles block load/store
-   // 1 : master: read:  receives the only 1 header from FSM, and sends the 1 block load command to the stream side
-   //             write: receives the header and N sub-blocks of data from dirty_data_r with cnt_o, and sends N sub-block store command to the stream side.
-   // 0 : client: read:  receives N sub-block of data from bsg_cache and sends N sub-block load responses to the stream side
-   //             write: combines N sub-block store responses from bsg_cache into 1 block store response, and sends it to stream side
-   , parameter logic master_p = 1  
+
+   , parameter payload_mask_p = 0
 
    `declare_bp_bedrock_mem_if_widths(paddr_width_p, stream_data_width_p, lce_id_width_p, lce_assoc_p, xce)
 
@@ -48,10 +44,11 @@ module bp_stream_pump_out
   `bp_cast_i(bp_bedrock_xce_mem_msg_header_s, fsm_header);
   `bp_cast_o(bp_bedrock_xce_mem_msg_header_s, mem_header);
 
-  enum logic [1:0] {e_reset, e_single, e_pass_stream, e_combine_stream} state_n, state_r;
+  enum logic [1:0] {e_reset, e_single, e_stream, e_combine_stream} state_n, state_r;
   
   wire is_read_op  = fsm_header_cast_i.msg_type inside {e_bedrock_mem_uc_rd, e_bedrock_mem_rd};
   wire is_write_op = fsm_header_cast_i.msg_type inside {e_bedrock_mem_uc_wr, e_bedrock_mem_wr};
+  wire has_data = payload_mask_p[fsm_header_cast_i.msg_type];
   wire [data_len_width_lp-1:0] num_stream = `BSG_MAX((1'b1 << fsm_header_cast_i.size) / (stream_data_width_p / 8), 1'b1);
   wire single_data_beat = (num_stream == data_len_width_lp'(1));
 
@@ -76,10 +73,6 @@ module bp_stream_pump_out
   assign cnt_o = set_cnt ? first_cnt : current_cnt;
   assign is_last_cnt = (cnt_o == last_cnt);
 
-  // For debugging
-  wire is_combine_stream = state_r inside {e_combine_stream};
-  wire is_pass_stream = state_r inside {e_pass_stream};
-
   always_comb 
     begin
       mem_header_cast_o = '0;
@@ -101,65 +94,41 @@ module bp_stream_pump_out
           begin
             mem_header_cast_o = fsm_header_cast_i;
             mem_data_o = fsm_data_i;
+            mem_lock_o = ~single_data_beat & has_data & fsm_v_i;
+            mem_v_o = ~(is_write_op & ~single_data_beat & ~has_data) & fsm_v_i;
 
-            if (master_p)
+            cnt_up  = ~single_data_beat & ((has_data & mem_yumi_i) | (is_write_op & ~has_data & fsm_v_i));
+            fsm_yumi_o = (is_write_op & ~has_data & ~single_data_beat) ? cnt_up : mem_yumi_i;
+            done_o = mem_yumi_i & ~cnt_up;
+
+            state_n = cnt_up ? e_stream : e_single;
+          end
+        e_stream:
+          begin
+            mem_header_cast_o = fsm_header_cast_i;
+            mem_data_o = fsm_data_i;
+            
+            if (has_data)
               begin
-                // at master side
-                mem_v_o = fsm_v_i;
-                mem_lock_o = is_write_op & ~single_data_beat & fsm_v_i;
-                fsm_yumi_o = mem_yumi_i;
+                mem_header_cast_o.addr = { fsm_header_cast_i.addr[paddr_width_p-1:stream_offset_width_lp+data_len_width_lp]
+                                        , cnt_o
+                                        , fsm_header_cast_i.addr[0+:stream_offset_width_lp] };
+                mem_v_o    = fsm_v_i;
+                mem_lock_o = ~is_last_cnt;
 
-                cnt_up = is_write_op & ~single_data_beat & mem_yumi_i;
-                done_o = mem_yumi_i & single_data_beat;
-                state_n = cnt_up ? e_pass_stream : e_single;
+                cnt_up     = mem_yumi_i;
+                fsm_yumi_o = mem_yumi_i;
               end
             else
               begin
-                // at client side: 
-                if (is_write_op & ~single_data_beat)
-                  begin
-                    cnt_up = fsm_v_i;
-                    fsm_yumi_o = cnt_up;
-                    state_n =  cnt_up ? e_combine_stream : e_single;
-                  end
-                else
-                  begin
-                    mem_v_o = fsm_v_i;
-                    mem_lock_o = ~single_data_beat & fsm_v_i;
-                    cnt_up = ~single_data_beat & mem_yumi_i;
-                    fsm_yumi_o = mem_yumi_i;
-                    done_o = mem_yumi_i & single_data_beat;
-                    state_n =  cnt_up ? e_pass_stream : e_single;
-                  end
+                mem_v_o = is_last_cnt & fsm_v_i;
+
+                cnt_up     = fsm_v_i;
+                fsm_yumi_o = is_last_cnt ?  mem_yumi_i : fsm_v_i;
               end
-          end
-        e_pass_stream:
-          begin
-            mem_header_cast_o = fsm_header_cast_i;
-            mem_header_cast_o.addr = { fsm_header_cast_i.addr[paddr_width_p-1:stream_offset_width_lp+data_len_width_lp]
-                                     , cnt_o
-                                     , fsm_header_cast_i.addr[0+:stream_offset_width_lp] };
-            mem_data_o = fsm_data_i;
-            mem_v_o = fsm_v_i;
-            mem_lock_o = ~is_last_cnt;
 
-            cnt_up = mem_yumi_i;
-            fsm_yumi_o = mem_yumi_i;
-            done_o = is_last_cnt & mem_yumi_i;
-            state_n = done_o ? e_single : e_pass_stream;
-          end
-
-        e_combine_stream:
-          begin
-            // combine n packets into 1 packet for write resp at the client side
-            mem_header_cast_o = fsm_header_cast_i;
-            mem_data_o = '0;
-            mem_v_o = is_last_cnt & fsm_v_i;
-
-            cnt_up = fsm_v_i;
-            fsm_yumi_o = fsm_v_i;
-            done_o = is_last_cnt & mem_yumi_i;
-            state_n = done_o ? e_single : e_combine_stream;
+            done_o  = is_last_cnt & mem_yumi_i;
+            state_n = done_o ? e_single : e_stream;
           end
       endcase
     end
