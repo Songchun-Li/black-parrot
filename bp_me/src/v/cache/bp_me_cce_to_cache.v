@@ -102,12 +102,12 @@ module bp_me_cce_to_cache
     ,.mem_lock_i(mem_cmd_lock_i)
     ,.mem_ready_o(mem_cmd_ready_o)
 
-    ,.fsm_header_o(mem_cmd_header_lo)
+    ,.fsm_base_header_o(mem_cmd_header_lo)
+    ,.fsm_addr_o(mem_cmd_stream_addr_lo)
     ,.fsm_data_o(mem_cmd_data_lo)
     ,.fsm_v_o(mem_cmd_v_lo)
     ,.fsm_yumi_i(mem_cmd_yumi_li)
 
-    ,.fsm_addr_o(mem_cmd_stream_addr_lo)
     ,.new_o(mem_cmd_new_lo)
     ,.done_o(mem_cmd_done_lo)
     );
@@ -152,7 +152,7 @@ module bp_me_cce_to_cache
     ,.mem_lock_o(mem_resp_lock_o)
     ,.mem_yumi_i(mem_resp_yumi_i)
     
-    ,.fsm_header_i(mem_resp_header_lo)
+    ,.fsm_base_header_i(mem_resp_header_lo)
     ,.fsm_data_i(cache_data_i)
     ,.fsm_v_i(mem_resp_v_lo & cache_v_i)
     ,.fsm_yumi_o(mem_resp_yumi_lo)

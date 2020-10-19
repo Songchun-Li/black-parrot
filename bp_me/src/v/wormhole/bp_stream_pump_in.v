@@ -32,20 +32,20 @@ module bp_stream_pump_in
   , output logic                                               mem_ready_o
   
   // FSM side
-  , output logic [bp_bedrock_xce_mem_msg_header_width_lp-1:0] fsm_header_o
+  , output logic [bp_bedrock_xce_mem_msg_header_width_lp-1:0] fsm_base_header_o
+  , output logic [paddr_width_p-1:0]                          fsm_addr_o
   , output logic [stream_data_width_p-1:0]                    fsm_data_o
   , output logic                                              fsm_v_o
   , input                                                     fsm_yumi_i
 
   // control signals
-  , output logic [paddr_width_p-1:0]           fsm_addr_o
   , output logic                               new_o
   , output logic                               done_o
   );
 
   `declare_bp_bedrock_mem_if(paddr_width_p, stream_data_width_p, lce_id_width_p, lce_assoc_p, xce);
   
-  `bp_cast_o(bp_bedrock_xce_mem_msg_header_s, fsm_header);
+  `bp_cast_o(bp_bedrock_xce_mem_msg_header_s, fsm_base_header);
 
   enum logic [1:0] {e_reset, e_single, e_stream} state_n, state_r;
 
@@ -87,7 +87,7 @@ module bp_stream_pump_in
      ,.val_i(first_cnt + 1'b1)
      ,.count_o(current_cnt)
      );
-  assign first_cnt = fsm_header_cast_o.addr[stream_offset_width_lp+:data_len_width_lp];
+  assign first_cnt = fsm_base_header_cast_o.addr[stream_offset_width_lp+:data_len_width_lp];
   assign last_cnt  = first_cnt + num_stream - 1'b1;
   
   logic [data_len_width_lp-1:0] cnt_o;
@@ -111,7 +111,7 @@ module bp_stream_pump_in
     begin
       mem_yumi_li  = '0;
 
-      fsm_header_cast_o = '0;
+      fsm_base_header_cast_o = '0;
       fsm_data_o = '0;
       fsm_v_o = '0;
 
@@ -129,7 +129,7 @@ module bp_stream_pump_in
         e_single:
           begin
             // handle message size < stream_data_width_p & write response w/o data payload
-            fsm_header_cast_o = mem_header_lo;
+            fsm_base_header_cast_o = mem_header_lo;
             fsm_data_o = mem_data_lo;
             fsm_v_o = mem_v_lo;
 
@@ -142,8 +142,8 @@ module bp_stream_pump_in
         e_stream:
           begin
             // handle message size > stream_data_width_p w/ data payload or commands reading more than data than stream_data_width_p
-            fsm_header_cast_o = mem_header_lo;
-            fsm_header_cast_o.addr[0+:block_offset_width_lp] = critical_addr_r; // keep the address to be the critical word address
+            fsm_base_header_cast_o = mem_header_lo;
+            fsm_base_header_cast_o.addr[0+:block_offset_width_lp] = critical_addr_r; // keep the address to be the critical word address
             fsm_data_o = mem_data_lo;
             fsm_v_o = mem_v_lo;
 
