@@ -103,7 +103,7 @@ module bp_lite_to_stream
      );
   assign first_cnt = mem_cast_i.header.addr[stream_offset_width_lp+:data_len_width_lp];
   assign last_cnt = first_cnt + num_stream_cmds - 1'b1;
-  bsg_dff_en 
+  bsg_dff_en_bypass
    #(.width_p(data_len_width_lp))
    last_cnt_reg
     (.clk_i(clk_i)
