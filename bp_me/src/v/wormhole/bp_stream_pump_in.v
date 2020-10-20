@@ -66,8 +66,7 @@ module bp_stream_pump_in
       ,.yumi_i(mem_yumi_li)
       );
 
-  wire is_read_op  = mem_header_lo.msg_type inside {e_bedrock_mem_uc_rd, e_bedrock_mem_rd};
-  wire is_write_op = mem_header_lo.msg_type inside {e_bedrock_mem_uc_wr, e_bedrock_mem_wr};
+  wire is_master = (payload_mask_p == mem_resp_payload_mask_gp);
   wire has_data = payload_mask_p[mem_header_lo.msg_type];
   wire [data_len_width_lp-1:0] num_stream = `BSG_MAX((1'b1 << mem_header_lo.size) / (stream_data_width_p / 8), 1'b1);
   wire single_data_beat = (num_stream == data_len_width_lp'(1));
@@ -122,7 +121,7 @@ module bp_stream_pump_in
       fsm_base_header_cast_o = mem_header_lo;
       fsm_data_o = mem_data_lo;
       fsm_v_o = mem_v_lo;
-      if (single_data_beat | (is_write_op & ~has_data))
+      if (single_data_beat | (is_master & ~has_data))
           begin
             is_single = 1'b1;
             is_stream = 1'b0;
@@ -144,7 +143,6 @@ module bp_stream_pump_in
             fsm_addr_o = { mem_header_lo.addr[paddr_width_p-1:stream_offset_width_lp+data_len_width_lp]
                          , cnt_o
                          , mem_header_lo.addr[0+:stream_offset_width_lp]};        
-            // mem_yumi_li = (is_read_op & ~mem_lock_lo & ~has_data) ? done_o : fsm_yumi_i;
 
             new_o =  fsm_yumi_i & ready_r;
             cnt_up = fsm_yumi_i;

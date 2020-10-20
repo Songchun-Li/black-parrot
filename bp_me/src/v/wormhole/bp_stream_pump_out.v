@@ -48,8 +48,7 @@ module bp_stream_pump_out
 
   enum logic [1:0] {e_reset, e_single, e_stream} state_n, state_r;
   
-  wire is_read_op  = fsm_base_header_cast_i.msg_type inside {e_bedrock_mem_uc_rd, e_bedrock_mem_rd};
-  wire is_write_op = fsm_base_header_cast_i.msg_type inside {e_bedrock_mem_uc_wr, e_bedrock_mem_wr};
+  wire is_master = (payload_mask_p == mem_cmd_payload_mask_gp);
   wire has_data = payload_mask_p[fsm_base_header_cast_i.msg_type];
   wire [data_len_width_lp-1:0] num_stream = `BSG_MAX((1'b1 << fsm_base_header_cast_i.size) / (stream_data_width_p / 8), 1'b1);
   wire single_data_beat = (num_stream == data_len_width_lp'(1));
@@ -93,7 +92,7 @@ module bp_stream_pump_out
       mem_data_o = fsm_data_i;
       mem_v_o = fsm_v_i;
 
-      if (single_data_beat | (is_read_op & ~has_data))
+      if (single_data_beat | (is_master & ~has_data))
         begin
           is_single = 1'b1;
           is_stream = 1'b0;
