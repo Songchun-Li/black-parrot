@@ -54,10 +54,20 @@ module bp_stream_pump_out
   wire [data_len_width_lp-1:0] num_stream = `BSG_MAX((1'b1 << fsm_base_header_cast_i.size) / (stream_data_width_p / 8), 1'b1);
   wire single_data_beat = (num_stream == data_len_width_lp'(1));
 
-  wire set_cnt = ~single_data_beat & fsm_v_i & state_r inside {e_single};
-
-  logic cnt_up, is_last_cnt;
+  logic ready_r, cnt_up, is_last_cnt;
   logic [data_len_width_lp-1:0] first_cnt, last_cnt, current_cnt;
+
+  bsg_dff_reset_en
+   #(.width_p(1))
+   streaming_reg
+    (.clk_i(clk_i)
+    ,.reset_i(reset_i | (cnt_up & ~done_o))
+    ,.en_i(done_o)
+    ,.data_i(done_o)
+    ,.data_o(ready_r)
+    );
+  wire set_cnt = ~single_data_beat & fsm_v_i & ready_r;
+
   bsg_counter_set_en
    #(.max_val_p(stream_words_lp-1), .reset_val_p(0))
    data_counter
@@ -75,74 +85,53 @@ module bp_stream_pump_out
   assign cnt_o = set_cnt ? first_cnt : current_cnt;
   assign is_last_cnt = (cnt_o == last_cnt);
 
+
+  logic is_single, is_stream;
   always_comb 
     begin
-      mem_header_cast_o = '0;
-      mem_data_o = '0;
-      mem_v_o = '0;
-      mem_lock_o = '0;
+      mem_header_cast_o = fsm_base_header_cast_i;
+      mem_data_o = fsm_data_i;
+      mem_v_o = fsm_v_i;
 
-      fsm_yumi_o = '0;
-      cnt_up = '0; 
-      done_o = '0;
+      if (single_data_beat | (is_read_op & ~has_data))
+        begin
+          is_single = 1'b1;
+          is_stream = 1'b0;
+          // handle message size < stream_data_width_p & read command w/o data payload
+          mem_lock_o = '0;
+          
+          fsm_yumi_o = mem_yumi_i;
 
-      state_n = state_r;
-      case (state_r)
-        e_reset:
-          begin
-            state_n = e_single;
-          end
-        e_single:
-          begin
-            // handle message size < stream_data_width_p & read command w/o data payload
-            mem_header_cast_o = fsm_base_header_cast_i;
-            mem_data_o = fsm_data_i;
-            mem_lock_o = ~single_data_beat & has_data & fsm_v_i;
-            mem_v_o = ~(is_write_op & ~single_data_beat & ~has_data) & fsm_v_i;
+          cnt_up  = '0;       
+          done_o = mem_yumi_i;
+        end
+      else
+        begin
+          is_single = 1'b0;
+          is_stream = 1'b1;
+          
+          if (has_data)
+            begin
+              // handle message size > stream_data_width_p w/ data payload
+              mem_header_cast_o.addr = { fsm_base_header_cast_i.addr[paddr_width_p-1:stream_offset_width_lp+data_len_width_lp]
+                                      , cnt_o
+                                      , fsm_base_header_cast_i.addr[0+:stream_offset_width_lp] };
+              mem_lock_o = ~is_last_cnt;
 
-            cnt_up  = ~single_data_beat & ((has_data & mem_yumi_i) | (is_write_op & ~has_data & fsm_v_i));
-            fsm_yumi_o = (is_write_op & ~has_data & ~single_data_beat) ? cnt_up : mem_yumi_i;
-            done_o = mem_yumi_i & ~cnt_up;
+              cnt_up     = mem_yumi_i;
+              fsm_yumi_o = mem_yumi_i;
+            end
+          else
+            begin
+              // handle message size > stream_data_width_p w/o data payload (combines write responses into one)
+              mem_v_o = is_last_cnt & fsm_v_i;
 
-            state_n = cnt_up ? e_stream : e_single;
-          end
-        e_stream:
-          begin
-            mem_header_cast_o = fsm_base_header_cast_i;
-            mem_data_o = fsm_data_i;
-            
-            if (has_data)
-              begin
-                // handle message size > stream_data_width_p w/ data payload
-                mem_header_cast_o.addr = { fsm_base_header_cast_i.addr[paddr_width_p-1:stream_offset_width_lp+data_len_width_lp]
-                                        , cnt_o
-                                        , fsm_base_header_cast_i.addr[0+:stream_offset_width_lp] };
-                mem_v_o    = fsm_v_i;
-                mem_lock_o = ~is_last_cnt;
+              cnt_up     = fsm_v_i;
+              fsm_yumi_o = is_last_cnt ?  mem_yumi_i : fsm_v_i;
+            end
 
-                cnt_up     = mem_yumi_i;
-                fsm_yumi_o = mem_yumi_i;
-              end
-            else
-              begin
-                // handle message size > stream_data_width_p w/o data payload (combines write responses into one)
-                mem_v_o = is_last_cnt & fsm_v_i;
-
-                cnt_up     = fsm_v_i;
-                fsm_yumi_o = is_last_cnt ?  mem_yumi_i : fsm_v_i;
-              end
-
-            done_o  = is_last_cnt & mem_yumi_i;
-            state_n = done_o ? e_single : e_stream;
-          end
-      endcase
+          done_o  = is_last_cnt & mem_yumi_i;
+        end
     end
-
-  // synopsys sync_set_reset "reset_i"
-  always_ff @(posedge clk_i)
-    if (reset_i)
-      state_r <= e_reset;
-    else
-      state_r <= state_n;
 
 endmodule

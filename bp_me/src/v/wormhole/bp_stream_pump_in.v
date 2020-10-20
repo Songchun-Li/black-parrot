@@ -47,8 +47,6 @@ module bp_stream_pump_in
   
   `bp_cast_o(bp_bedrock_xce_mem_msg_header_s, fsm_base_header);
 
-  enum logic [1:0] {e_reset, e_single, e_stream} state_n, state_r;
-
   bp_bedrock_xce_mem_msg_header_s mem_header_lo;
   logic [stream_data_width_p-1:0] mem_data_lo;
   logic mem_v_lo, mem_yumi_li, mem_lock_lo;
@@ -98,7 +96,7 @@ module bp_stream_pump_in
   assign critical_addr = mem_header_lo.addr[0+:block_offset_width_lp];
 
   // store this addr for stream state
-  bsg_dff_en 
+  bsg_dff_en_bypass 
    #(.width_p(block_offset_width_lp))
    critical_addr_reg
     (.clk_i(clk_i)
@@ -107,65 +105,54 @@ module bp_stream_pump_in
     ,.data_o(critical_addr_r)
     );
 
-  always_comb 
+  logic ready_r;
+  bsg_dff_reset_en
+   #(.width_p(1))
+   ready_reg
+    (.clk_i(clk_i)
+    ,.reset_i(reset_i | (cnt_up & ~done_o))
+    ,.en_i(done_o)
+    ,.data_i(done_o)
+    ,.data_o(ready_r)
+    );
+
+  logic is_single, is_stream;
+  always_comb
     begin
-      mem_yumi_li  = '0;
-
-      fsm_base_header_cast_o = '0;
-      fsm_data_o = '0;
-      fsm_v_o = '0;
-
-      fsm_addr_o = '0;
-      new_o = '0;
-      cnt_up = '0;
-      done_o = '0;
-
-      state_n = state_r;
-      case (state_r)
-        e_reset:
+      fsm_base_header_cast_o = mem_header_lo;
+      fsm_data_o = mem_data_lo;
+      fsm_v_o = mem_v_lo;
+      if (single_data_beat | (is_write_op & ~has_data))
           begin
-            state_n = e_single;
-          end
-        e_single:
-          begin
+            is_single = 1'b1;
+            is_stream = 1'b0;
             // handle message size < stream_data_width_p & write response w/o data payload
-            fsm_base_header_cast_o = mem_header_lo;
-            fsm_data_o = mem_data_lo;
-            fsm_v_o = mem_v_lo;
+            fsm_addr_o = '0;
+            
+            mem_yumi_li = fsm_yumi_i;
 
-            mem_yumi_li = ~(is_read_op & ~mem_lock_lo & ~has_data & ~single_data_beat) & fsm_yumi_i;
-            new_o = ~single_data_beat & ~(is_write_op & ~has_data) & fsm_yumi_i; 
-            done_o = fsm_yumi_i & ~new_o; // used for UCE to send credits return
-            cnt_up = new_o;
-            state_n = new_o ? e_stream : e_single;
+            new_o = '0;
+            cnt_up = '0;
+            done_o = fsm_yumi_i; // used for UCE to send credits return
           end
-        e_stream:
+        else
           begin
+            is_single = 1'b0;
+            is_stream = 1'b1;
             // handle message size > stream_data_width_p w/ data payload or commands reading more than data than stream_data_width_p
-            fsm_base_header_cast_o = mem_header_lo;
             fsm_base_header_cast_o.addr[0+:block_offset_width_lp] = critical_addr_r; // keep the address to be the critical word address
-            fsm_data_o = mem_data_lo;
-            fsm_v_o = mem_v_lo;
-
             fsm_addr_o = { mem_header_lo.addr[paddr_width_p-1:stream_offset_width_lp+data_len_width_lp]
                          , cnt_o
-                         , mem_header_lo.addr[0+:stream_offset_width_lp]};
+                         , mem_header_lo.addr[0+:stream_offset_width_lp]};        
+            // mem_yumi_li = (is_read_op & ~mem_lock_lo & ~has_data) ? done_o : fsm_yumi_i;
 
+            new_o =  fsm_yumi_i & ready_r;
             cnt_up = fsm_yumi_i;
             done_o = is_last_cnt & fsm_yumi_i;
-            mem_yumi_li = (is_read_op & ~mem_lock_lo & ~has_data) ? done_o : fsm_yumi_i;
-            state_n = done_o ? e_single : e_stream;
+
+            mem_yumi_li =  has_data ? fsm_yumi_i : done_o;
           end
-      endcase
     end
-
-    // synopsys sync_set_reset "reset_i"
-    always_ff @(posedge clk_i)
-      if (reset_i)
-        state_r <= e_reset;
-      else
-        state_r <= state_n;
-
     // TODO: assertion to identify whether critical_addr is aligned to the bus_data_width/burst_width
 
 endmodule
