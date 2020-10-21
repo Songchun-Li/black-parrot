@@ -274,7 +274,7 @@ module bp_uce
     ,.mem_lock_o(mem_cmd_lock_o)
     ,.mem_yumi_i(mem_cmd_yumi_li)
 
-    ,.fsm_header_i(cmd_header_lo)
+    ,.fsm_base_header_i(cmd_header_lo)
     ,.fsm_data_i(cmd_data_lo)
     ,.fsm_v_i(cmd_v_lo)
     ,.fsm_yumi_o(cmd_yumi_li)
@@ -299,12 +299,12 @@ module bp_uce
     ,.mem_lock_i(mem_resp_lock_i)
     ,.mem_ready_o(mem_resp_ready_o)
     
-    ,.fsm_header_o(resp_header_li)
+    ,.fsm_base_header_o(resp_header_li)
+    ,.fsm_addr_o(mem_resp_addr_lo)
     ,.fsm_data_o(resp_data_li)
     ,.fsm_v_o(resp_v_li)
     ,.fsm_yumi_i(resp_yumi_lo)
 
-    ,.fsm_addr_o(mem_resp_addr_lo)
     ,.new_o(new_resp_li)
     ,.done_o(mem_resp_done)
     );
