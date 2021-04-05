@@ -63,7 +63,7 @@ module bp_burst_to_stream
     ,.data_o(out_header_lo)
     );
 
-  logic header_v_r, header_clear;
+  logic header_v_r, header_clear, header_v_lo;
   bsg_dff_reset_set_clear
    #(.width_p(1)
    ,.clear_over_set_p(1))

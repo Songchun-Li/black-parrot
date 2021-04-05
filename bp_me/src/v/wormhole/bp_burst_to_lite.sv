@@ -50,7 +50,7 @@ module bp_burst_to_lite
   localparam burst_offset_width_lp = `BSG_SAFE_CLOG2(out_data_bytes_lp);
 
   bp_bedrock_in_msg_header_s header_lo;
-  logic header_v_r, header_clear;
+  logic header_v_r, header_clear, header_v_lo;
   bsg_dff_en_bypass
    #(.width_p($bits(bp_bedrock_in_msg_header_s)))
    header_reg
