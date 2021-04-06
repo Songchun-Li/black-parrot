@@ -385,10 +385,10 @@
       ,dcache_sets        : 128
       ,dcache_assoc       : 4
       ,dcache_block_width : 256
-      ,dcache_fill_width  : 256
-      ,l2_data_width      : 256
-      ,l2_fill_width      : 256
-      ,mem_noc_flit_width : 256
+      ,dcache_fill_width  : 128
+      ,l2_data_width      : 128
+      ,l2_fill_width      : 128
+      ,mem_noc_flit_width : 128
       ,default : "inv"
       };
   `bp_aviary_derive_cfg(bp_unicore_l1_hetero_cfg_p
