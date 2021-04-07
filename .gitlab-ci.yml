@@ -20,7 +20,7 @@ stages:
 
 
 bleach_all:
-  when: manual
+  when: always
   stage: manual
   tags:
     - bsg
