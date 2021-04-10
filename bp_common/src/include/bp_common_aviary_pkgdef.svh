@@ -234,11 +234,11 @@
       ,dcache_sets          : 64
       ,dcache_assoc         : 8
       ,dcache_block_width   : 512
-      ,dcache_fill_width    : 512
+      ,dcache_fill_width    : 64
       ,icache_sets          : 64
       ,icache_assoc         : 8
       ,icache_block_width   : 512
-      ,icache_fill_width    : 512
+      ,icache_fill_width    : 64
       ,acache_sets          : 64
       ,acache_assoc         : 8
       ,acache_block_width   : 512
@@ -453,6 +453,8 @@
       ,num_cce       : 1
       ,num_lce       : 2
       ,l1_coherent   : 1
+      ,dcache_fill_width : 512
+      ,icache_fill_width : 512
       ,default : "inv"
       };
   `bp_aviary_derive_cfg(bp_multicore_1_cfg_p
