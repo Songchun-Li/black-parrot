@@ -182,11 +182,13 @@ module bp_be_dcache
     : byte_offset_width_lp;
 
   // State machine declaration
-  enum logic [2:0] {e_ready, e_miss, e_fence, e_req} state_n, state_r;
+  enum logic [2:0] {e_ready, e_miss, e_fence, e_req, e_early, e_remiss} state_n, state_r;
   wire is_ready = (state_r == e_ready);
   wire is_miss  = (state_r == e_miss);
   wire is_fence = (state_r == e_fence);
   wire is_req   = (state_r == e_req);
+  wire is_early = (state_r == e_early);
+  wire is_remiss = (state_r == e_remiss);
 
   // Global signals
   logic tl_we, tv_we, dm_we;
@@ -253,6 +255,7 @@ module bp_be_dcache
   logic [assoc_p-1:0][bank_width_lp-1:0]            data_mem_data_li;
   logic [assoc_p-1:0][data_mem_mask_width_lp-1:0]   data_mem_mask_li;
   logic [assoc_p-1:0][bank_width_lp-1:0]            data_mem_data_lo;
+  logic [assoc_p-1:0][bank_width_lp-1:0]            bypass_data_lo;
 
   for (genvar i = 0; i < assoc_p; i++)
     begin : d
@@ -271,6 +274,16 @@ module bp_be_dcache
          ,.write_mask_i(data_mem_mask_li[i])
          ,.data_o(data_mem_data_lo[i])
          );
+
+      // tocheck
+      bsg_dff_en_bypass
+       #(.width_p(bank_width_lp))
+      data_bypass_reg
+       (.clk_i((~clk_i))
+        ,.en_i(data_mem_v_li[i] & data_mem_w_li[i])
+        ,.data_i(data_mem_data_li[i])
+        ,.data_o(bypass_data_lo[i])
+        );
     end
 
   /////////////////////////////////////////////////////////////////////////////
@@ -922,6 +935,8 @@ module bp_be_dcache
   //   e_miss   : Cache is waiting for a miss to be serviced
   //   e_fence  : Cache is waiting for a fence to be resolved
   //   e_req    : Cache is waiting to send a request, but the engine is blocked
+  //   e_early  : Part of the requested block is filled, make the core restart early
+  //   e_remiss : Cache Miss happens again in early restart
   /////////////////////////////////////////////////////////////////////////////
   always_comb
     case (state_r)
@@ -939,6 +954,8 @@ module bp_be_dcache
                          : (cache_req_yumi_i & nonblocking_req)
                            ? e_ready
                            : e_req;
+      e_early: state_n = cache_req_complete_i ? e_ready : e_early; // One more branch here to handle cache miss in e_early
+      e_remiss: state_n = cache_req_complete_i ? e_ready : e_remiss;
       default: state_n = e_ready;
     endcase
 
@@ -1131,6 +1148,26 @@ module bp_be_dcache
      ,.rot_i(read_data_rot_li)
      ,.o(data_mem_o)
      );
+
+  // Add a new register to recoded which fill unit is valid
+  logic [block_size_in_fill_lp-1:0] data_valid_r;
+  for (genvar i = 0; i < block_size_in_fill_lp; i++)
+    begin : partial_fill
+      bsg_dff_reset_set_clear
+       #(.width_p(1)
+        ,.clear_over_set_p(1)  // clear at the last count
+        )
+      data_valid_reg
+        (.clk_i(~clk_i)
+        ,.reset_i(reset_i)
+        ,.set_i(data_mem_pkt_fill_mask_expanded[i] & data_mem_pkt_yumi_o)
+        ,.clear_i(cache_req_complete_i)
+        ,.data_o(data_valid_r[i])
+        );
+    end
+
+  // data_valid_reg is active only at e_early state
+  // special case: shall we bypass the data when access is the fill
 
   ///////////////////////////
   // Stat Mem Control
