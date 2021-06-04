@@ -77,6 +77,8 @@
  *      - bank_width = block_width / assoc >= dword_width
  *      - fill_width = N*bank_width <= block_width
  *
+ *    About critical-word-first/early-restart, an additional restriction on the parameters is that
+ *    fill_wdth_p == bank_width_lp
  */
 
 `include "bp_common_defines.svh"
@@ -217,6 +219,8 @@ module bp_be_dcache
   wire [sindex_width_lp-1:0]       vaddr_index = page_offset[block_offset_width_lp+:sindex_width_lp];
   wire [bindex_width_lp-1:0]       vaddr_bank  = page_offset[byte_offset_width_lp+:bindex_width_lp];
 
+  // store the page
+
   ///////////////////////////
   // Tag Mem Storage
   ///////////////////////////
@@ -255,7 +259,7 @@ module bp_be_dcache
   logic [assoc_p-1:0][bank_width_lp-1:0]            data_mem_data_li;
   logic [assoc_p-1:0][data_mem_mask_width_lp-1:0]   data_mem_mask_li;
   logic [assoc_p-1:0][bank_width_lp-1:0]            data_mem_data_lo;
-  logic [assoc_p-1:0][bank_width_lp-1:0]            bypass_data_lo;
+  logic [assoc_p-1:0][bank_width_lp-1:0]            bypassed_data_mem_data_lo;
 
   for (genvar i = 0; i < assoc_p; i++)
     begin : d
@@ -275,15 +279,16 @@ module bp_be_dcache
          ,.data_o(data_mem_data_lo[i])
          );
 
-      // tocheck
+      // When in e_early state, bypass the data from data mem with the data_bypass_reg
       bsg_dff_en_bypass
        #(.width_p(bank_width_lp))
       data_bypass_reg
        (.clk_i((~clk_i))
         ,.en_i(data_mem_v_li[i] & data_mem_w_li[i])
         ,.data_i(data_mem_data_li[i])
-        ,.data_o(bypass_data_lo[i])
+        ,.data_o(bypassed_data_mem_data_lo[i])
         );
+      assign bypassed_data_mem_data_lo[i] = is_early ?  bypassed_data_mem_data_lo[i] : data_mem_data_lo[i];
     end
 
   /////////////////////////////////////////////////////////////////////////////
@@ -324,6 +329,7 @@ module bp_be_dcache
   for (genvar i = 0; i < assoc_p; i++) begin: tag_comp_tl
     wire tag_match_tl      = (ptag_i == tag_mem_data_lo[i].tag);
     assign way_v_tl[i]     = (tag_mem_data_lo[i].state != e_COH_I);
+    // todo add data valid check when it is in e_early state.
     assign load_hit_tl[i]  = tag_match_tl & (tag_mem_data_lo[i].state != e_COH_I);
     assign store_hit_tl[i] = tag_match_tl & (tag_mem_data_lo[i].state inside {e_COH_M, e_COH_E});
   end
@@ -414,7 +420,7 @@ module bp_be_dcache
 //  assign v_tv_r = _v_tv_r & (_v_tv_r ^ _v_tv_pr ^ _v_tv_nr);
 
   logic [block_width_p-1:0] ld_data_tv_n;
-  assign ld_data_tv_n = data_mem_data_lo;
+  assign ld_data_tv_n = bypassed_data_mem_data_lo; // TODO replace this signal to the bypassed one
   bsg_dff_en
    #(.width_p(block_width_p))
    ld_data_tv_reg
@@ -1165,6 +1171,8 @@ module bp_be_dcache
         ,.data_o(data_valid_r[i])
         );
     end
+  
+  // decode the sub-block address, find out which fill unit it is accessing
 
   // data_valid_reg is active only at e_early state
   // special case: shall we bypass the data when access is the fill
