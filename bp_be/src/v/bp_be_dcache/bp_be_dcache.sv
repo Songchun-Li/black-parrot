@@ -219,7 +219,28 @@ module bp_be_dcache
   wire [sindex_width_lp-1:0]       vaddr_index = page_offset[block_offset_width_lp+:sindex_width_lp];
   wire [bindex_width_lp-1:0]       vaddr_bank  = page_offset[byte_offset_width_lp+:bindex_width_lp];
 
-  // store the page
+  // store the page offset that was filling in
+  logic filling_block_addr_en_li;
+  logic [-1:0]filling_block_addr_r; //TOCHECK
+  bsg_dff_en 
+    #(.width_p(page_offset_width_gp))
+    filling_block_addr_reg
+     (.clk_i(clk_i)
+      ,.data_i('0) // silicing from data_mem_pkt
+      ,.en_i(filling_block_addr_en_li)
+      ,.data_o(filling_block_addr_r)
+      );
+  
+  // Following parts are only effective only in e_early state
+  // compare if the target address is in the filling block
+  // if yes, it will not sent out miss request
+  // if not, it will after the block is being fill.
+  wire filling_block_hit;
+
+
+  // checkout whether the target fill unit is availble
+
+  //
 
   ///////////////////////////
   // Tag Mem Storage
@@ -285,7 +306,7 @@ module bp_be_dcache
       data_bypass_reg
        (.clk_i((~clk_i))
         ,.en_i(data_mem_v_li[i] & data_mem_w_li[i])
-        ,.data_i(data_mem_data_li[i])
+        ,.data_i('0) //TODO
         ,.data_o(bypassed_data_mem_data_lo[i])
         );
       assign bypassed_data_mem_data_lo[i] = is_early ?  bypassed_data_mem_data_lo[i] : data_mem_data_lo[i];
@@ -1156,7 +1177,7 @@ module bp_be_dcache
      );
 
   // Add a new register to recoded which fill unit is valid
-  logic [block_size_in_fill_lp-1:0] data_valid_r;
+  logic [block_size_in_fill_lp-1:0] data_valid_r; // we should use the bank
   for (genvar i = 0; i < block_size_in_fill_lp; i++)
     begin : partial_fill
       bsg_dff_reset_set_clear
