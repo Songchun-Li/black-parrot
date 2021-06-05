@@ -63,6 +63,7 @@
  *      address).
  *      3) An invalidate received from the LCE. This command covers all cases of losing exclusive
  *      access to the block in this hart, including eviction and a cache miss.
+
  *    RISC-V guarantees forward progress for LR/SC sequences that match a set of conditions.
  *      BlackParrot guarantees progress by blocking remote invalidations until a following SC
  *      (subject to a timeout). Tradeoffs between local and remote QoS can be made by adjusting
