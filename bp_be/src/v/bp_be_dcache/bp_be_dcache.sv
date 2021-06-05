@@ -63,7 +63,6 @@
  *      address).
  *      3) An invalidate received from the LCE. This command covers all cases of losing exclusive
  *      access to the block in this hart, including eviction and a cache miss.
-
  *    RISC-V guarantees forward progress for LR/SC sequences that match a set of conditions.
  *      BlackParrot guarantees progress by blocking remote invalidations until a following SC
  *      (subject to a timeout). Tradeoffs between local and remote QoS can be made by adjusting
@@ -77,8 +76,6 @@
  *      - bank_width = block_width / assoc >= dword_width
  *      - fill_width = N*bank_width <= block_width
  *
- *    About critical-word-first/early-restart, an additional restriction on the parameters is that
- *    fill_wdth_p == bank_width_lp
  */
 
 `include "bp_common_defines.svh"
@@ -184,13 +181,11 @@ module bp_be_dcache
     : byte_offset_width_lp;
 
   // State machine declaration
-  enum logic [2:0] {e_ready, e_miss, e_fence, e_req, e_early, e_remiss} state_n, state_r;
+  enum logic [2:0] {e_ready, e_miss, e_fence, e_req} state_n, state_r;
   wire is_ready = (state_r == e_ready);
   wire is_miss  = (state_r == e_miss);
   wire is_fence = (state_r == e_fence);
   wire is_req   = (state_r == e_req);
-  wire is_early = (state_r == e_early);
-  wire is_remiss = (state_r == e_remiss);
 
   // Global signals
   logic tl_we, tv_we, dm_we;
@@ -218,29 +213,6 @@ module bp_be_dcache
   wire [page_offset_width_gp-1:0]  page_offset = dcache_pkt_cast_i.page_offset;
   wire [sindex_width_lp-1:0]       vaddr_index = page_offset[block_offset_width_lp+:sindex_width_lp];
   wire [bindex_width_lp-1:0]       vaddr_bank  = page_offset[byte_offset_width_lp+:bindex_width_lp];
-
-  // store the page offset that was filling in
-  logic filling_block_addr_en_li;
-  logic [-1:0]filling_block_addr_r; //TOCHECK
-  bsg_dff_en 
-    #(.width_p(page_offset_width_gp))
-    filling_block_addr_reg
-     (.clk_i(clk_i)
-      ,.data_i('0) // silicing from data_mem_pkt
-      ,.en_i(filling_block_addr_en_li)
-      ,.data_o(filling_block_addr_r)
-      );
-  
-  // Following parts are only effective only in e_early state
-  // compare if the target address is in the filling block
-  // if yes, it will not sent out miss request
-  // if not, it will after the block is being fill.
-  wire filling_block_hit;
-
-
-  // checkout whether the target fill unit is availble
-
-  //
 
   ///////////////////////////
   // Tag Mem Storage
@@ -280,7 +252,6 @@ module bp_be_dcache
   logic [assoc_p-1:0][bank_width_lp-1:0]            data_mem_data_li;
   logic [assoc_p-1:0][data_mem_mask_width_lp-1:0]   data_mem_mask_li;
   logic [assoc_p-1:0][bank_width_lp-1:0]            data_mem_data_lo;
-  logic [assoc_p-1:0][bank_width_lp-1:0]            bypassed_data_mem_data_lo;
 
   for (genvar i = 0; i < assoc_p; i++)
     begin : d
@@ -299,17 +270,6 @@ module bp_be_dcache
          ,.write_mask_i(data_mem_mask_li[i])
          ,.data_o(data_mem_data_lo[i])
          );
-
-      // When in e_early state, bypass the data from data mem with the data_bypass_reg
-      bsg_dff_en_bypass
-       #(.width_p(bank_width_lp))
-      data_bypass_reg
-       (.clk_i((~clk_i))
-        ,.en_i(data_mem_v_li[i] & data_mem_w_li[i])
-        ,.data_i('0) //TODO
-        ,.data_o(bypassed_data_mem_data_lo[i])
-        );
-      assign bypassed_data_mem_data_lo[i] = is_early ?  bypassed_data_mem_data_lo[i] : data_mem_data_lo[i];
     end
 
   /////////////////////////////////////////////////////////////////////////////
@@ -350,7 +310,6 @@ module bp_be_dcache
   for (genvar i = 0; i < assoc_p; i++) begin: tag_comp_tl
     wire tag_match_tl      = (ptag_i == tag_mem_data_lo[i].tag);
     assign way_v_tl[i]     = (tag_mem_data_lo[i].state != e_COH_I);
-    // todo add data valid check when it is in e_early state.
     assign load_hit_tl[i]  = tag_match_tl & (tag_mem_data_lo[i].state != e_COH_I);
     assign store_hit_tl[i] = tag_match_tl & (tag_mem_data_lo[i].state inside {e_COH_M, e_COH_E});
   end
@@ -441,7 +400,7 @@ module bp_be_dcache
 //  assign v_tv_r = _v_tv_r & (_v_tv_r ^ _v_tv_pr ^ _v_tv_nr);
 
   logic [block_width_p-1:0] ld_data_tv_n;
-  assign ld_data_tv_n = bypassed_data_mem_data_lo; // TODO replace this signal to the bypassed one
+  assign ld_data_tv_n = data_mem_data_lo;
   bsg_dff_en
    #(.width_p(block_width_p))
    ld_data_tv_reg
@@ -962,8 +921,6 @@ module bp_be_dcache
   //   e_miss   : Cache is waiting for a miss to be serviced
   //   e_fence  : Cache is waiting for a fence to be resolved
   //   e_req    : Cache is waiting to send a request, but the engine is blocked
-  //   e_early  : Part of the requested block is filled, make the core restart early
-  //   e_remiss : Cache Miss happens again in early restart
   /////////////////////////////////////////////////////////////////////////////
   always_comb
     case (state_r)
@@ -981,8 +938,6 @@ module bp_be_dcache
                          : (cache_req_yumi_i & nonblocking_req)
                            ? e_ready
                            : e_req;
-      e_early: state_n = cache_req_complete_i ? e_ready : e_early; // One more branch here to handle cache miss in e_early
-      e_remiss: state_n = cache_req_complete_i ? e_ready : e_remiss;
       default: state_n = e_ready;
     endcase
 
@@ -1175,28 +1130,6 @@ module bp_be_dcache
      ,.rot_i(read_data_rot_li)
      ,.o(data_mem_o)
      );
-
-  // Add a new register to recoded which fill unit is valid
-  logic [block_size_in_fill_lp-1:0] data_valid_r; // we should use the bank
-  for (genvar i = 0; i < block_size_in_fill_lp; i++)
-    begin : partial_fill
-      bsg_dff_reset_set_clear
-       #(.width_p(1)
-        ,.clear_over_set_p(1)  // clear at the last count
-        )
-      data_valid_reg
-        (.clk_i(~clk_i)
-        ,.reset_i(reset_i)
-        ,.set_i(data_mem_pkt_fill_mask_expanded[i] & data_mem_pkt_yumi_o)
-        ,.clear_i(cache_req_complete_i)
-        ,.data_o(data_valid_r[i])
-        );
-    end
-  
-  // decode the sub-block address, find out which fill unit it is accessing
-
-  // data_valid_reg is active only at e_early state
-  // special case: shall we bypass the data when access is the fill
 
   ///////////////////////////
   // Stat Mem Control

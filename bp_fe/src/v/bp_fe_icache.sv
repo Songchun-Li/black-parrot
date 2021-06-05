@@ -24,6 +24,9 @@
  *    Uses fill_index in data_mem_pkt to generate a write_mask for the data banks
  *      bank_width = block_width / assoc >= dword_width
  *      fill_width = N*bank_width <= block_width
+ *
+ *    About critical-word-first/early-restart, an additional restriction on the parameters is that
+ *    fill_wdth_p == bank_width_lp 
  */
 
 `include "bp_common_defines.svh"
@@ -124,9 +127,11 @@ module bp_fe_icache
   localparam fill_size_in_bank_lp   = fill_width_p / bank_width_lp;
 
   // State machine declaration
-  enum logic [1:0] {e_ready, e_miss} state_n, state_r;
+  enum logic [1:0] {e_ready, e_miss, e_early, e_early_miss} state_n, state_r;
   wire is_ready   = (state_r == e_ready);
   wire is_miss    = (state_r == e_miss);
+  wire is_early   = (state_r == e_early);
+  wire is_early_miss = (state_r = e_early_miss);
 
   // Feedback signals between stages
   logic tl_we, tv_we;
@@ -150,6 +155,29 @@ module bp_fe_icache
   wire [vtag_width_p-1:0]    vaddr_vtag  = vaddr[block_offset_width_lp+sindex_width_lp+:vtag_width_p];
   wire [sindex_width_lp-1:0] vaddr_index = vaddr[block_offset_width_lp+:sindex_width_lp];
   wire [bindex_width_lp-1:0] vaddr_bank  = vaddr[byte_offset_width_lp+:bindex_width_lp];
+
+  // store the address that was filling in TODO
+  logic filling_block_addr_en_li;
+  logic [-1:0]filling_block_addr_r; //TOCHECK
+  bsg_dff_en 
+    #(.width_p(page_offset_width_gp))
+    filling_block_addr_reg
+     (.clk_i(clk_i)
+      ,.data_i('0) // silicing from data_mem_pkt
+      ,.en_i(filling_block_addr_en_li)
+      ,.data_o(filling_block_addr_r)
+      );
+
+  // Following parts are only effective only in e_early state
+  // compare if the target address is in the filling block
+  // if yes, it will not sent out miss request
+  // if not, it will after the block is being fill.
+  wire filling_block_hit;
+
+
+  // checkout whether the target fill unit is availble
+
+  //
 
   ///////////////////////////
   // Tag Mem Storage
@@ -185,6 +213,7 @@ module bp_fe_icache
   logic [assoc_p-1:0][data_mem_addr_width_lp-1:0] data_mem_addr_li;
   logic [assoc_p-1:0][bank_width_lp-1:0]          data_mem_data_li;
   logic [assoc_p-1:0][bank_width_lp-1:0]          data_mem_data_lo;
+  logic [assoc_p-1:0][bank_width_lp-1:0]          bypassed_data_mem_data_lo;
 
   for (genvar bank = 0; bank < assoc_p; bank++)
     begin: data_mems
@@ -198,6 +227,17 @@ module bp_fe_icache
          ,.w_i(data_mem_w_li[bank])
          ,.data_o(data_mem_data_lo[bank])
          );
+      
+      // When in e_early state, bypass the data from data mem with the data_bypass_reg
+      bsg_dff_en_bypass
+       #(.width_p(bank_width_lp))
+      data_bypass_reg
+       (.clk_i((~clk_i))
+        ,.en_i(data_mem_v_li[i] & data_mem_w_li[i])
+        ,.data_i('0) //TODO
+        ,.data_o(bypassed_data_mem_data_lo[i])
+        );
+      assign bypassed_data_mem_data_lo[i] = is_early ?  bypassed_data_mem_data_lo[i] : data_mem_data_lo[i];
     end
 
   /////////////////////////////////////////////////////////////////////////////
@@ -241,7 +281,7 @@ module bp_fe_icache
     assign way_v_tl[i] = (tag_mem_data_lo[i].state != e_COH_I);
     assign hit_v_tl[i] = (tag_mem_data_lo[i].tag == ptag_i) && way_v_tl[i];
   end
-  wire cached_hit_tl     = |hit_v_tl;
+  wire cached_hit_tl     = |hit_v_tl; // todo add data valid check when it is in e_early state.  
   wire fetch_uncached_tl = (fetch_op_tl_r &  uncached_i);
   wire fetch_cached_tl   = (fetch_op_tl_r & ~uncached_i);
   wire fill_tl           = (fill_op_tl_r | ~nonidem_i);
@@ -303,7 +343,8 @@ module bp_fe_icache
      );
 
   logic [block_width_p-1:0] ld_data_tv_n;
-  assign ld_data_tv_n = data_mem_data_lo;
+  assign ld_data_tv_n = data_mem_data_lo; 
+  //assign ld_data_tv_n = bypassed_data_mem_data_lo; // TODO replace this signal to the bypassed one
   bsg_dff_en
    #(.width_p(block_width_p))
    ld_data_tv_reg
@@ -442,11 +483,15 @@ module bp_fe_icache
   // State machine
   //   e_ready  : Cache is ready to accept requests
   //   e_miss   : Cache is waiting for a cache request to be serviced
+  //   e_early  : Part of the requested block is filled, make the core restart early
+  //   e_early_miss : Cache Miss happens again in early restart
   /////////////////////////////////////////////////////////////////////////////
   always_comb
     case (state_r)
       e_ready  : state_n = cache_req_yumi_i ? e_miss : e_ready;
       e_miss   : state_n = cache_req_complete_i ? e_ready : e_miss;
+      e_early: state_n = cache_req_complete_i ? e_ready : e_early; // One more branch here to handle cache miss in e_early
+      e_remiss: state_n = cache_req_complete_i ? e_ready : e_remiss;
       default: state_n = e_ready;
     endcase
 
@@ -622,6 +667,29 @@ module bp_fe_icache
      ,.rot_i(read_data_rot_li)
      ,.o(data_mem_o)
      );
+
+  // Add a new register to recoded which fill unit is valid
+  logic [block_size_in_fill_lp-1:0] data_valid_r; // we should use the bank
+  for (genvar i = 0; i < block_size_in_fill_lp; i++)
+    begin : partial_fill
+      bsg_dff_reset_set_clear
+       #(.width_p(1)
+        ,.clear_over_set_p(1)  // clear at the last count
+        )
+      data_valid_reg
+        (.clk_i(~clk_i)
+        ,.reset_i(reset_i)
+        ,.set_i(data_mem_pkt_fill_mask_expanded[i] & data_mem_pkt_yumi_o)
+        ,.clear_i(cache_req_complete_i)
+        ,.data_o(data_valid_r[i])
+        );
+    end
+
+  // decode the sub-block address, find out which fill unit it is accessing
+
+  // data_valid_reg is active only at e_early state
+  // special case: shall we bypass the data when access is the fill
+
 
   ///////////////////////////
   // Stat Mem Control
