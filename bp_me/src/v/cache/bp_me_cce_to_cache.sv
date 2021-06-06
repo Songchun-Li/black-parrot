@@ -78,7 +78,8 @@ module bp_me_cce_to_cache
 
   assign mem_cmd_cast_i = mem_cmd_i;
   assign mem_resp_o = mem_resp_cast_o;
-
+  
+  // TODO the size can be shrink
   bp_bedrock_cce_mem_msg_s mem_cmd_lo;
   logic mem_cmd_v_lo, mem_cmd_yumi_li;
   bsg_fifo_1r1w_small
@@ -123,6 +124,10 @@ module bp_me_cce_to_cache
 
   wire cmd_word_op = (mem_cmd_lo.header.size == e_bedrock_msg_size_4);
 
+  // Control logic for resp header
+  logic mem_resp_header_v_li, mem_resp_header_ready_lo;
+  logic mem_resp_header_v_lo, mem_resp_header_yumi_li;
+
   always_comb begin
     cache_pkt.mask = '0;
     cache_pkt.data = '0;
@@ -137,6 +142,8 @@ module bp_me_cce_to_cache
     cmd_state_n = cmd_state_r;
     cmd_counter_n = cmd_counter_r;
     cmd_max_count_n = cmd_max_count_r;
+
+    mem_resp_header_v_li = '0;
 
     case (cmd_state_r)
       RESET: begin
@@ -236,7 +243,7 @@ module bp_me_cce_to_cache
             cache_pkt.mask = '1;
           end
 
-        if (ready_i)
+        if (ready_i && mem_resp_header_ready_lo)
           begin
             cmd_counter_n = cmd_counter_r + 1;
             if (cmd_counter_r == cmd_max_count_r)
@@ -244,12 +251,29 @@ module bp_me_cce_to_cache
                 cmd_counter_n = '0;
                 cmd_state_n = READY;
                 mem_cmd_yumi_li = 1'b1;
+                mem_resp_header_v_li = 1'b1;
               end
           end
       end
     endcase
   end
 
+  //TODO the size can be shrink
+  bsg_fifo_1r1w_small
+   #(.width_p(cce_mem_msg_header_width_lp), .els_p(l2_outstanding_reqs_p))
+   resp_header_fifo
+    (.clk_i(clk_i)
+    ,.reset_i(reset_i)
+
+    ,.data_i(mem_cmd_lo.header)
+    ,.v_i(mem_resp_header_v_li)
+    ,.ready_o(mem_resp_header_ready_lo)
+
+    ,.data_o(mem_resp_cast_o.header)
+    ,.v_o(mem_resp_header_v_lo)
+    ,.yumi_i(mem_resp_header_yumi_li)
+    );
+  assign mem_resp_header_yumi_li = mem_resp_yumi_i;
 
   typedef enum logic [1:0] {
     RESP_RESET
@@ -279,16 +303,6 @@ module bp_me_cce_to_cache
       resp_data_r[resp_counter_r] <= resp_data_n;
     end
   end
-
-  bsg_dff_en
-   #(.width_p(cce_mem_msg_width_lp-cce_block_width_p))
-   resp_header_reg
-    (.clk_i(clk_i)
-     ,.en_i(mem_cmd_yumi_li)
-
-     ,.data_i(mem_cmd_lo.header)
-     ,.data_o(mem_resp_cast_o.header)
-     );
 
   wire [cce_block_width_p-1:0] resp_data_slice = resp_data_r;
   bsg_bus_pack
@@ -354,6 +368,7 @@ module bp_me_cce_to_cache
           end
       end
       RESP_SEND: begin
+        mem_resp_v_o = mem_resp_header_v_lo;
         mem_resp_v_o = 1'b1;
         if (mem_resp_yumi_i)
           begin
@@ -362,6 +377,23 @@ module bp_me_cce_to_cache
       end
     endcase
   end
+
+  // logic [counter_width_lp-1:0] cmd_counter_new;
+  // bsg_counter_set_en
+  //  #(.max_val_p(7)
+  //   ,.reset_val_p(0))
+  //  cmd_counter
+  //   (.clk_i(clk_i)
+  //   ,.reset_i(reset_i)
+
+  //   ,.set_i() 
+  //   ,.en_i(cmd_counter_up)
+  //   ,.val_i(counter_width_lp'(cmd_counter_up))
+  //   ,.count_o(cmd_counter_new)
+  //   );
+
+  // assign last_cnt  = first_cnt + num_stream - 1'b1;
+  // is_last_cnt = (cmd_counter_new == last_cnt);
 
   //synopsys translate_off
   always_ff @(negedge clk_i)
