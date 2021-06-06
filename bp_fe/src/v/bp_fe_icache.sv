@@ -131,7 +131,7 @@ module bp_fe_icache
   wire is_ready   = (state_r == e_ready);
   wire is_miss    = (state_r == e_miss);
   wire is_early   = (state_r == e_early);
-  wire is_early_miss = (state_r = e_early_miss);
+  wire is_early_miss = (state_r == e_early_miss);
 
   // Feedback signals between stages
   logic tl_we, tv_we;
@@ -158,14 +158,14 @@ module bp_fe_icache
 
   // store the address that was filling in TODO
   logic filling_block_addr_en_li;
-  logic [-1:0]filling_block_addr_r; //TOCHECK
+  logic [data_mem_addr_width_lp-1:0]filling_addr_r; //TOCHECK
   bsg_dff_en 
-    #(.width_p(page_offset_width_gp))
-    filling_block_addr_reg
+    #(.width_p(data_mem_addr_width_lp))
+    filling_addr_reg
      (.clk_i(clk_i)
       ,.data_i('0) // silicing from data_mem_pkt
       ,.en_i(filling_block_addr_en_li)
-      ,.data_o(filling_block_addr_r)
+      ,.data_o(filling_addr_r)
       );
 
   // Following parts are only effective only in e_early state
@@ -233,11 +233,11 @@ module bp_fe_icache
        #(.width_p(bank_width_lp))
       data_bypass_reg
        (.clk_i((~clk_i))
-        ,.en_i(data_mem_v_li[i] & data_mem_w_li[i])
-        ,.data_i('0) //TODO
-        ,.data_o(bypassed_data_mem_data_lo[i])
+        ,.en_i(data_mem_v_li[bank] & data_mem_w_li[bank])
+        ,.data_i(data_mem_data_li[bank]) //TODO
+        ,.data_o(bypassed_data_mem_data_lo[bank])
         );
-      assign bypassed_data_mem_data_lo[i] = is_early ?  bypassed_data_mem_data_lo[i] : data_mem_data_lo[i];
+      assign bypassed_data_mem_data_lo[bank] = is_early ?  bypassed_data_mem_data_lo[bank] : data_mem_data_lo[bank];
     end
 
   /////////////////////////////////////////////////////////////////////////////
@@ -491,7 +491,7 @@ module bp_fe_icache
       e_ready  : state_n = cache_req_yumi_i ? e_miss : e_ready;
       e_miss   : state_n = cache_req_complete_i ? e_ready : e_miss;
       e_early: state_n = cache_req_complete_i ? e_ready : e_early; // One more branch here to handle cache miss in e_early
-      e_remiss: state_n = cache_req_complete_i ? e_ready : e_remiss;
+      e_early_miss: state_n = cache_req_complete_i ? e_ready : e_early_miss;
       default: state_n = e_ready;
     endcase
 
@@ -636,6 +636,7 @@ module bp_fe_icache
   wire data_mem_slow_uncached = data_mem_pkt_v_i & (data_mem_pkt_cast_i.opcode == e_cache_data_mem_uncached);
   wire data_mem_slow_read     = data_mem_pkt_v_i & (data_mem_pkt_cast_i.opcode == e_cache_data_mem_read);
   logic [assoc_p-1:0] data_mem_fast_read;
+  logic [assoc_p-1:0][bindex_width_lp-1:0] data_mem_pkt_offset;
   for (genvar i = 0; i < assoc_p; i++)
     begin : data_mem_lines
       wire data_mem_slow_write     = data_mem_pkt_v_i & (data_mem_pkt_cast_i.opcode == e_cache_data_mem_write) & data_mem_write_bank_mask[i];
@@ -643,10 +644,10 @@ module bp_fe_icache
 
       assign data_mem_v_li[i] = data_mem_fast_read[i] | (data_mem_pkt_yumi_o & (data_mem_slow_read | data_mem_slow_write));
       assign data_mem_w_li[i] = data_mem_pkt_yumi_o & data_mem_slow_write;
-      wire [bindex_width_lp-1:0] data_mem_pkt_offset = (bindex_width_lp'(i) - data_mem_pkt_cast_i.way_id);
+      assign data_mem_pkt_offset[i] = (bindex_width_lp'(i) - data_mem_pkt_cast_i.way_id);
       assign data_mem_addr_li[i] = data_mem_fast_read[i]
         ? {vaddr_index, {(assoc_p > 1){vaddr_bank}}}
-        : {data_mem_pkt_cast_i.index, {(assoc_p > 1){data_mem_pkt_offset}}};
+        : {data_mem_pkt_cast_i.index, {(assoc_p > 1){data_mem_pkt_offset[i]}}};
     end
   assign data_mem_pkt_yumi_o = data_mem_pkt_v_i & (~|data_mem_fast_read | data_mem_slow_uncached);
 
