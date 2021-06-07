@@ -106,18 +106,27 @@ module bp_me_cce_to_cache
       tagst_sent_r     <= '0;
       tagst_received_r <= '0;
       cmd_counter_r    <= '0;
-      cmd_max_count_r  <= '0;
     end
     else begin
       cmd_state_r      <= cmd_state_n;
       tagst_sent_r     <= tagst_sent_n;
       tagst_received_r <= tagst_received_n;
       cmd_counter_r    <= cmd_counter_n;
-      cmd_max_count_r  <= cmd_max_count_n;
     end
   end
 
   logic is_resp_ready;
+  // new resp count control
+  logic max_cnt_en_li;
+  bsg_dff_en_bypass
+   #(.width_p(counter_width_lp))
+   cmd_max_count_reg
+    (.clk_i(clk_i)
+    ,.en_i(max_cnt_en_li) // key: when to update the max
+    ,.data_i(cmd_max_count_n)
+    ,.data_o(cmd_max_count_r)
+    );
+  
 
   bp_local_addr_s local_addr_cast;
   assign local_addr_cast = mem_cmd_lo.header.addr;
@@ -127,6 +136,7 @@ module bp_me_cce_to_cache
   // Control logic for resp header
   logic mem_resp_header_v_li, mem_resp_header_ready_lo;
   logic mem_resp_header_v_lo, mem_resp_header_yumi_li;
+  logic is_clear_tag;
 
   always_comb begin
     cache_pkt.mask = '0;
@@ -137,11 +147,13 @@ module bp_me_cce_to_cache
     tagst_received_n = tagst_received_r;
     v_o = 1'b0;
 
+    is_clear_tag = 1'b0;
     mem_cmd_yumi_li = 1'b0;
 
     cmd_state_n = cmd_state_r;
     cmd_counter_n = cmd_counter_r;
-    cmd_max_count_n = cmd_max_count_r;
+    cmd_max_count_n = '0;
+    max_cnt_en_li = 1'b0;
 
     mem_resp_header_v_li = '0;
 
@@ -170,6 +182,7 @@ module bp_me_cce_to_cache
         cmd_state_n = (tagst_sent_r == l2_assoc_p*l2_sets_p) & (tagst_received_r == l2_assoc_p*l2_sets_p)
           ? READY
           : CLEAR_TAG;
+        is_clear_tag = 1'b1;
       end
       READY: begin
         // Technically possible to bypass and save a cycle
@@ -185,6 +198,7 @@ module bp_me_cce_to_cache
               e_bedrock_msg_size_64: cmd_max_count_n = counter_width_lp'(7);
               default: cmd_max_count_n = '0;
             endcase
+            max_cnt_en_li = 1'b1;
             cmd_state_n = SEND;
           end
       end
@@ -258,7 +272,6 @@ module bp_me_cce_to_cache
     endcase
   end
 
-  //TODO the size can be shrink
   bsg_fifo_1r1w_small
    #(.width_p(cce_mem_msg_header_width_lp), .els_p(2))
    resp_header_fifo
@@ -278,7 +291,7 @@ module bp_me_cce_to_cache
   typedef enum logic [1:0] {
     RESP_RESET
     ,RESP_READY
-    ,RESP_RECEIVE
+    ,RESP_BUSY
   } resp_state_e;
 
   resp_state_e resp_state_r, resp_state_n;
@@ -300,6 +313,18 @@ module bp_me_cce_to_cache
       resp_max_count_r  <= resp_max_count_n;
     end
   end
+
+  // new resp count
+  logic resp_max_cnt_en_li;
+  logic [counter_width_lp-1:0] resp_max_count_new;
+  bsg_dff_en_bypass
+   #(.width_p(counter_width_lp))
+   resp_max_count_reg
+    (.clk_i(clk_i)
+    ,.en_i(max_cnt_en_li) // not optimal TODO
+    ,.data_i(cmd_max_count_n) // not optimal TODO
+    ,.data_o(resp_max_count_new)
+    );
 
   // This is register is used to identify whether data is ready and 
   // set barrier between data for different request.
@@ -327,8 +352,8 @@ module bp_me_cce_to_cache
      ,.data_o(mem_resp_cast_o.data)
      );
 
+  assign yumi_o = is_clear_tag ? v_i : v_i & ~resp_data_done_r; // cache "acks" TAGST commands with zero-data responses
   always_comb begin
-    yumi_o = 1'b0;
     is_resp_ready = 1'b0;
 
     resp_state_n = resp_state_r;
@@ -342,8 +367,6 @@ module bp_me_cce_to_cache
       RESP_RESET: begin
         // hold in RESP_RESET until command FSM finishes clearing cache tags
         resp_state_n = (cmd_state_n == READY) ? RESP_READY : RESP_RESET;
-        // cache "acks" TAGST commands with zero-data responses
-        yumi_o = v_i;
       end
       RESP_READY: begin
         is_resp_ready = 1'b1;
@@ -362,20 +385,15 @@ module bp_me_cce_to_cache
               e_bedrock_msg_size_64: resp_max_count_n = counter_width_lp'(7);
               default: resp_max_count_n = '0;
             endcase
-            resp_state_n = RESP_RECEIVE;
-          end
-        else
-          begin
-            yumi_o = v_i;
+            resp_state_n = RESP_BUSY;
           end
       end
-      RESP_RECEIVE: begin
-        yumi_o = v_i & ~resp_data_done_r;
+      RESP_BUSY: begin
         resp_data_done_li = (resp_counter_r == resp_max_count_r) & yumi_o;
         // valid mem_resp when all the data and header is ready
         mem_resp_v_o = mem_resp_header_v_lo & (resp_data_done_li | resp_data_done_r);
         // mem_resp is sent
-        resp_state_n = mem_resp_yumi_i ? RESP_READY : RESP_RECEIVE;
+        resp_state_n = mem_resp_yumi_i ? RESP_READY : RESP_BUSY;
         resp_counter_n = mem_resp_yumi_i ? '0 : resp_counter_r + yumi_o;
       end
     endcase
@@ -401,23 +419,6 @@ module bp_me_cce_to_cache
         );
     end
   
-  // logic [counter_width_lp-1:0] cmd_counter_new;
-  // bsg_counter_set_en
-  //  #(.max_val_p(7)
-  //   ,.reset_val_p(0))
-  //  cmd_counter
-  //   (.clk_i(clk_i)
-  //   ,.reset_i(reset_i)
-
-  //   ,.set_i() 
-  //   ,.en_i(cmd_counter_up)
-  //   ,.val_i(counter_width_lp'(cmd_counter_up))
-  //   ,.count_o(cmd_counter_new)
-  //   );
-
-  // assign last_cnt  = first_cnt + num_stream - 1'b1;
-  // is_last_cnt = (cmd_counter_new == last_cnt);
-
   //synopsys translate_off
   always_ff @(negedge clk_i)
     begin
