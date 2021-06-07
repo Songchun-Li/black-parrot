@@ -186,7 +186,7 @@ module bp_me_cce_to_cache
       end
       READY: begin
         // Technically possible to bypass and save a cycle
-        if (mem_cmd_v_lo & is_resp_ready)
+        if (mem_cmd_v_lo & is_resp_ready  & mem_resp_header_ready_lo)
           begin
             case (mem_cmd_lo.header.size)
               e_bedrock_msg_size_1
@@ -199,6 +199,7 @@ module bp_me_cce_to_cache
               default: cmd_max_count_n = '0;
             endcase
             max_cnt_en_li = 1'b1;
+            mem_resp_header_v_li = 1'b1;
             cmd_state_n = SEND;
           end
       end
@@ -257,7 +258,7 @@ module bp_me_cce_to_cache
             cache_pkt.mask = '1;
           end
 
-        if (ready_i && mem_resp_header_ready_lo)
+        if (ready_i)
           begin
             cmd_counter_n = cmd_counter_r + 1;
             if (cmd_counter_r == cmd_max_count_r)
@@ -265,7 +266,6 @@ module bp_me_cce_to_cache
                 cmd_counter_n = '0;
                 cmd_state_n = READY;
                 mem_cmd_yumi_li = 1'b1;
-                mem_resp_header_v_li = 1'b1;
               end
           end
       end
@@ -322,8 +322,9 @@ module bp_me_cce_to_cache
    resp_max_count_reg
     (.clk_i(clk_i)
     ,.en_i(max_cnt_en_li) // not optimal TODO
-    ,.data_i(cmd_max_count_n) // not optimal TODO
+    ,.data_i(resp_max_count_n) // not optimal TODO
     ,.data_o(resp_max_count_new)
+    // ,.data_o(resp_max_count_r)
     );
 
   // This is register is used to identify whether data is ready and 
@@ -359,6 +360,7 @@ module bp_me_cce_to_cache
     resp_state_n = resp_state_r;
     resp_counter_n = resp_counter_r;
     resp_max_count_n = resp_max_count_r;
+    // resp_max_count_n = '0;//todo
 
     resp_data_done_li = 1'b0;
     mem_resp_v_o = 1'b0;
@@ -396,6 +398,34 @@ module bp_me_cce_to_cache
         resp_state_n = mem_resp_yumi_i ? RESP_READY : RESP_BUSY;
         resp_counter_n = mem_resp_yumi_i ? '0 : resp_counter_r + yumi_o;
       end
+      ///////
+      ///////
+      ///////
+      ///////
+      // RESP_READY: begin
+      //   // if (mem_cmd_v_lo)
+      //   //   begin
+      //   //     case (mem_cmd_lo.header.size)
+      //   //       e_bedrock_msg_size_1
+      //   //       ,e_bedrock_msg_size_2
+      //   //       ,e_bedrock_msg_size_4
+      //   //       ,e_bedrock_msg_size_8: resp_max_count_n = '0;
+      //   //       e_bedrock_msg_size_16: resp_max_count_n = counter_width_lp'(1);
+      //   //       e_bedrock_msg_size_32: resp_max_count_n = counter_width_lp'(3);
+      //   //       e_bedrock_msg_size_64: resp_max_count_n = counter_width_lp'(7);
+      //   //       default: resp_max_count_n = '0;
+      //   //     endcase
+      //   //   end
+      //   resp_data_done_li = (resp_counter_r == resp_max_count_r) & yumi_o;
+      //   // valid mem_resp when all the data and header is ready
+      //   mem_resp_v_o = mem_resp_header_v_lo & (resp_data_done_li | resp_data_done_r);
+      //   // mem_resp is sent
+      //   resp_counter_n = mem_resp_yumi_i ? '0 : resp_counter_r + yumi_o;
+      // end
+      ///////
+      ///////
+      ///////
+      ///////
     endcase
   end
 
