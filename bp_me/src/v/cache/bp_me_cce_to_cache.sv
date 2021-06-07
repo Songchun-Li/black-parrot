@@ -260,7 +260,7 @@ module bp_me_cce_to_cache
 
   //TODO the size can be shrink
   bsg_fifo_1r1w_small
-   #(.width_p(cce_mem_msg_header_width_lp), .els_p(l2_outstanding_reqs_p))
+   #(.width_p(cce_mem_msg_header_width_lp), .els_p(2))
    resp_header_fifo
     (.clk_i(clk_i)
     ,.reset_i(reset_i)
@@ -348,6 +348,9 @@ module bp_me_cce_to_cache
       RESP_READY: begin
         is_resp_ready = 1'b1;
         if (mem_cmd_v_lo)
+          // if (mem_resp_header_v_lo)  // may comes in too late
+          // when there is a valid resp header shows up, it indicates that is should jump
+          // there is a 2-cycle access latency from the cache, so it is okay to jump a cycle late              
           begin
             case (mem_cmd_lo.header.size)
               e_bedrock_msg_size_1
@@ -398,59 +401,6 @@ module bp_me_cce_to_cache
         );
     end
   
-  ////////////
-  // always_comb begin
-  //   yumi_o = 1'b0;
-  //   is_resp_ready = 1'b0;
-
-  //   resp_state_n = resp_state_r;
-  //   resp_counter_n = resp_counter_r;
-  //   resp_max_count_n = resp_max_count_r;
-
-  //   mem_resp_v_o = 1'b0;
-
-  //   case (resp_state_r)
-  //     RESP_RESET: begin
-  //       // hold in RESP_RESET until command FSM finishes clearing cache tags
-  //       resp_state_n = (cmd_state_n == READY) ? RESP_READY : RESP_RESET;
-  //       // cache "acks" TAGST commands with zero-data responses
-  //       yumi_o = v_i;
-  //     end
-  //     RESP_READY: begin
-  //       is_resp_ready = 1'b1;
-  //       if (mem_resp_header_v_lo)  // may comes in too late
-  //         // when there is a valid resp header shows up, it indicates that is should jump
-  //         // there is a 2-cycle access latency from the cache, so it is okay to jump a cycle late              
-  //         begin
-  //           case (mem_resp_cast_o.header)
-  //             e_bedrock_msg_size_1
-  //             ,e_bedrock_msg_size_2
-  //             ,e_bedrock_msg_size_4
-  //             ,e_bedrock_msg_size_8: resp_max_count_n = '0;
-  //             e_bedrock_msg_size_16: resp_max_count_n = counter_width_lp'(1);
-  //             e_bedrock_msg_size_32: resp_max_count_n = counter_width_lp'(3);
-  //             e_bedrock_msg_size_64: resp_max_count_n = counter_width_lp'(7);
-  //             default: resp_max_count_n = '0;
-  //           endcase
-  //           resp_state_n = RESP_RECEIVE;
-  //         end
-  //       else
-  //         begin
-  //           yumi_o = v_i && ~mem_resp_header_v_lo; // when there is no header in the header fifo, it is safe to ignore 
-  //         end
-  //     end
-  //       RESP_RECEIVE: begin
-  //         yumi_o = v_i & ~resp_data_done_r;
-  //         resp_data_done_li = (resp_counter_r == resp_max_count_r) & yumi_o;
-  //         // valid resp when all the data and header is ready
-  //         mem_resp_v_o = mem_resp_header_v_lo & (resp_data_done_li | resp_data_done_r);
-  //         // resp sent
-  //         resp_state_n = mem_resp_yumi_i ? RESP_READY : RESP_RECEIVE;
-  //         resp_counter_n = mem_resp_yumi_i ? '0 : resp_counter_r + yumi_o;
-  //       end
-  //   endcase
-  // end
-
   // logic [counter_width_lp-1:0] cmd_counter_new;
   // bsg_counter_set_en
   //  #(.max_val_p(7)
