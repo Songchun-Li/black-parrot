@@ -115,7 +115,6 @@ module bp_me_cce_to_cache
     end
   end
 
-  logic is_resp_ready;
   // new resp count control
   logic max_cnt_en_li;
   bsg_dff_en_bypass
@@ -186,7 +185,7 @@ module bp_me_cce_to_cache
       end
       READY: begin
         // Technically possible to bypass and save a cycle
-        if (mem_cmd_v_lo & is_resp_ready  & mem_resp_header_ready_lo)
+        if (mem_cmd_v_lo & mem_resp_header_ready_lo)
           begin
             case (mem_cmd_lo.header.size)
               e_bedrock_msg_size_1
@@ -291,7 +290,6 @@ module bp_me_cce_to_cache
   typedef enum logic [1:0] {
     RESP_RESET
     ,RESP_READY
-    ,RESP_BUSY
   } resp_state_e;
 
   resp_state_e resp_state_r, resp_state_n;
@@ -305,15 +303,25 @@ module bp_me_cce_to_cache
     if (reset_i) begin
       resp_state_r      <= RESP_RESET;
       resp_counter_r    <= '0;
-      resp_max_count_r  <= '0;
     end
     else begin
       resp_state_r      <= resp_state_n;
       resp_counter_r    <= resp_counter_n;
-      resp_max_count_r  <= resp_max_count_n;
     end
   end
 
+  logic resp_busy_r;
+  bsg_dff_reset_set_clear
+   #(.width_p(1)
+   ,.clear_over_set_p(1))
+    resp_busy_reg
+    (.clk_i(clk_i)
+    ,.reset_i(reset_i | is_clear_tag)
+    ,.set_i(yumi_o)
+    ,.clear_i(mem_resp_yumi_i)
+    ,.data_o(resp_busy_r)
+    );
+  
   // new resp count
   logic resp_max_cnt_en_li;
   logic [counter_width_lp-1:0] resp_max_count_new;
@@ -321,10 +329,9 @@ module bp_me_cce_to_cache
    #(.width_p(counter_width_lp))
    resp_max_count_reg
     (.clk_i(clk_i)
-    ,.en_i(max_cnt_en_li) // not optimal TODO
-    ,.data_i(resp_max_count_n) // not optimal TODO
-    ,.data_o(resp_max_count_new)
-    // ,.data_o(resp_max_count_r)
+    ,.en_i(mem_resp_header_v_lo & ~resp_busy_r)
+    ,.data_i(resp_max_count_n)
+    ,.data_o(resp_max_count_r)
     );
 
   // This is register is used to identify whether data is ready and 
@@ -355,12 +362,9 @@ module bp_me_cce_to_cache
 
   assign yumi_o = is_clear_tag ? v_i : v_i & ~resp_data_done_r; // cache "acks" TAGST commands with zero-data responses
   always_comb begin
-    is_resp_ready = 1'b0;
-
     resp_state_n = resp_state_r;
     resp_counter_n = resp_counter_r;
-    resp_max_count_n = resp_max_count_r;
-    // resp_max_count_n = '0;//todo
+    resp_max_count_n = '0;
 
     resp_data_done_li = 1'b0;
     mem_resp_v_o = 1'b0;
@@ -371,61 +375,22 @@ module bp_me_cce_to_cache
         resp_state_n = (cmd_state_n == READY) ? RESP_READY : RESP_RESET;
       end
       RESP_READY: begin
-        is_resp_ready = 1'b1;
-        if (mem_cmd_v_lo)
-          // if (mem_resp_header_v_lo)  // may comes in too late
-          // when there is a valid resp header shows up, it indicates that is should jump
-          // there is a 2-cycle access latency from the cache, so it is okay to jump a cycle late              
-          begin
-            case (mem_cmd_lo.header.size)
-              e_bedrock_msg_size_1
-              ,e_bedrock_msg_size_2
-              ,e_bedrock_msg_size_4
-              ,e_bedrock_msg_size_8: resp_max_count_n = '0;
-              e_bedrock_msg_size_16: resp_max_count_n = counter_width_lp'(1);
-              e_bedrock_msg_size_32: resp_max_count_n = counter_width_lp'(3);
-              e_bedrock_msg_size_64: resp_max_count_n = counter_width_lp'(7);
-              default: resp_max_count_n = '0;
-            endcase
-            resp_state_n = RESP_BUSY;
-          end
-      end
-      RESP_BUSY: begin
+        case (mem_resp_cast_o.header.size)
+          e_bedrock_msg_size_1
+          ,e_bedrock_msg_size_2
+          ,e_bedrock_msg_size_4
+          ,e_bedrock_msg_size_8: resp_max_count_n = '0;
+          e_bedrock_msg_size_16: resp_max_count_n = counter_width_lp'(1);
+          e_bedrock_msg_size_32: resp_max_count_n = counter_width_lp'(3);
+          e_bedrock_msg_size_64: resp_max_count_n = counter_width_lp'(7);
+          default: resp_max_count_n = '0;
+        endcase
         resp_data_done_li = (resp_counter_r == resp_max_count_r) & yumi_o;
         // valid mem_resp when all the data and header is ready
         mem_resp_v_o = mem_resp_header_v_lo & (resp_data_done_li | resp_data_done_r);
         // mem_resp is sent
-        resp_state_n = mem_resp_yumi_i ? RESP_READY : RESP_BUSY;
         resp_counter_n = mem_resp_yumi_i ? '0 : resp_counter_r + yumi_o;
       end
-      ///////
-      ///////
-      ///////
-      ///////
-      // RESP_READY: begin
-      //   // if (mem_cmd_v_lo)
-      //   //   begin
-      //   //     case (mem_cmd_lo.header.size)
-      //   //       e_bedrock_msg_size_1
-      //   //       ,e_bedrock_msg_size_2
-      //   //       ,e_bedrock_msg_size_4
-      //   //       ,e_bedrock_msg_size_8: resp_max_count_n = '0;
-      //   //       e_bedrock_msg_size_16: resp_max_count_n = counter_width_lp'(1);
-      //   //       e_bedrock_msg_size_32: resp_max_count_n = counter_width_lp'(3);
-      //   //       e_bedrock_msg_size_64: resp_max_count_n = counter_width_lp'(7);
-      //   //       default: resp_max_count_n = '0;
-      //   //     endcase
-      //   //   end
-      //   resp_data_done_li = (resp_counter_r == resp_max_count_r) & yumi_o;
-      //   // valid mem_resp when all the data and header is ready
-      //   mem_resp_v_o = mem_resp_header_v_lo & (resp_data_done_li | resp_data_done_r);
-      //   // mem_resp is sent
-      //   resp_counter_n = mem_resp_yumi_i ? '0 : resp_counter_r + yumi_o;
-      // end
-      ///////
-      ///////
-      ///////
-      ///////
     endcase
   end
 
