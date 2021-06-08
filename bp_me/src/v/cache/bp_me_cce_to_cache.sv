@@ -61,11 +61,12 @@ module bp_me_cce_to_cache
   bsg_cache_pkt_s cache_pkt;
   assign cache_pkt_o = cache_pkt;
 
-  typedef enum logic [1:0] {
+  typedef enum logic [2:0] {
     RESET
     ,CLEAR_TAG
     ,READY
     ,SEND
+    ,MULTI_CYCLE
   } cmd_state_e;
 
   cmd_state_e cmd_state_r, cmd_state_n;
@@ -125,7 +126,7 @@ module bp_me_cce_to_cache
     ,.data_i(cmd_max_count_n)
     ,.data_o(cmd_max_count_r)
     );
-  
+  wire is_multi_cycle_req = !(cmd_max_count_r == '0);
 
   bp_local_addr_s local_addr_cast;
   assign local_addr_cast = mem_cmd_lo.header.addr;
@@ -183,6 +184,95 @@ module bp_me_cce_to_cache
           : CLEAR_TAG;
         is_clear_tag = 1'b1;
       end
+      // READY: begin
+      //   // Technically possible to bypass and save a cycle
+      //   if (mem_cmd_v_lo & mem_resp_header_ready_lo)
+      //     begin
+      //       case (mem_cmd_lo.header.size)
+      //         e_bedrock_msg_size_1
+      //         ,e_bedrock_msg_size_2
+      //         ,e_bedrock_msg_size_4
+      //         ,e_bedrock_msg_size_8: cmd_max_count_n = '0;
+      //         e_bedrock_msg_size_16: cmd_max_count_n = counter_width_lp'(1);
+      //         e_bedrock_msg_size_32: cmd_max_count_n = counter_width_lp'(3);
+      //         e_bedrock_msg_size_64: cmd_max_count_n = counter_width_lp'(7);
+      //         default: cmd_max_count_n = '0;
+      //       endcase
+      //       max_cnt_en_li = 1'b1;
+      //       mem_resp_header_v_li = 1'b1;
+      //       cmd_state_n = SEND;
+      //     end
+      // end
+      // SEND: begin
+      //   v_o = 1'b1;
+      //   case (mem_cmd_lo.header.msg_type)
+      //     e_bedrock_mem_rd
+      //     ,e_bedrock_mem_uc_rd:
+      //       case (mem_cmd_lo.header.size)
+      //         e_bedrock_msg_size_1: cache_pkt.opcode = LB;
+      //         e_bedrock_msg_size_2: cache_pkt.opcode = LH;
+      //         e_bedrock_msg_size_4: cache_pkt.opcode = LW;
+      //         e_bedrock_msg_size_8
+      //         ,e_bedrock_msg_size_16
+      //         ,e_bedrock_msg_size_32
+      //         ,e_bedrock_msg_size_64: cache_pkt.opcode = LM;
+      //         default: cache_pkt.opcode = LB;
+      //       endcase
+      //     e_bedrock_mem_uc_wr
+      //     ,e_bedrock_mem_wr
+      //     ,e_bedrock_mem_amo:
+      //       case (mem_cmd_lo.header.size)
+      //         e_bedrock_msg_size_1: cache_pkt.opcode = SB;
+      //         e_bedrock_msg_size_2: cache_pkt.opcode = SH;
+      //         e_bedrock_msg_size_4, e_bedrock_msg_size_8:
+      //           case (mem_cmd_lo.header.subop)
+      //             e_bedrock_store  : cache_pkt.opcode = cmd_word_op ? SW : SD;
+      //             e_bedrock_amoswap: cache_pkt.opcode = cmd_word_op ? AMOSWAP_W : AMOSWAP_D;
+      //             e_bedrock_amoadd : cache_pkt.opcode = cmd_word_op ? AMOADD_W : AMOADD_D;
+      //             e_bedrock_amoxor : cache_pkt.opcode = cmd_word_op ? AMOXOR_W : AMOXOR_D;
+      //             e_bedrock_amoand : cache_pkt.opcode = cmd_word_op ? AMOAND_W : AMOAND_D;
+      //             e_bedrock_amoor  : cache_pkt.opcode = cmd_word_op ? AMOOR_W : AMOOR_D;
+      //             e_bedrock_amomin : cache_pkt.opcode = cmd_word_op ? AMOMIN_W : AMOMIN_D;
+      //             e_bedrock_amomax : cache_pkt.opcode = cmd_word_op ? AMOMAX_W : AMOMAX_D;
+      //             e_bedrock_amominu: cache_pkt.opcode = cmd_word_op ? AMOMINU_W : AMOMINU_D;
+      //             e_bedrock_amomaxu: cache_pkt.opcode = cmd_word_op ? AMOMAXU_W : AMOMAXU_D;
+      //             default : begin end
+      //           endcase
+      //         e_bedrock_msg_size_16
+      //         ,e_bedrock_msg_size_32
+      //         ,e_bedrock_msg_size_64: cache_pkt.opcode = SM;
+      //         default: cache_pkt.opcode = LB;
+      //       endcase
+      //     default: cache_pkt.opcode = LB;
+      //   endcase
+
+      //   if ((mem_cmd_lo.header.addr < dram_base_addr_gp) && (local_addr_cast.dev == cache_tagfl_base_addr_gp))
+      //     begin
+      //       cache_pkt.opcode = TAGFL;
+      //       cache_pkt.addr = {cmd_data[0][0+:lg_sets_lp+lg_ways_lp], block_offset_width_lp'(0)};
+      //     end
+      //   else
+      //     begin
+      //       cache_pkt.data = cmd_data[cmd_counter_r];
+      //       cache_pkt.addr = cmd_addr + cmd_counter_r*data_mask_width_lp;
+      //       cache_pkt.mask = '1;
+      //     end
+
+      //   if (ready_i)
+      //     begin
+      //       cmd_counter_n = cmd_counter_r + 1;
+      //       if (cmd_counter_r == cmd_max_count_r)
+      //         begin
+      //           cmd_counter_n = '0;
+      //           cmd_state_n = READY;
+      //           mem_cmd_yumi_li = 1'b1;
+      //         end
+      //     end
+      // end
+      /////////////
+      /////////////
+      /////////////
+      // TODO CHANGE READY AND SEND STATE
       READY: begin
         // Technically possible to bypass and save a cycle
         if (mem_cmd_v_lo & mem_resp_header_ready_lo)
@@ -211,8 +301,8 @@ module bp_me_cce_to_cache
               e_bedrock_msg_size_1: cache_pkt.opcode = LB;
               e_bedrock_msg_size_2: cache_pkt.opcode = LH;
               e_bedrock_msg_size_4: cache_pkt.opcode = LW;
-              e_bedrock_msg_size_8
-              ,e_bedrock_msg_size_16
+              e_bedrock_msg_size_8: cache_pkt.opcode = LD;
+              e_bedrock_msg_size_16
               ,e_bedrock_msg_size_32
               ,e_bedrock_msg_size_64: cache_pkt.opcode = LM;
               default: cache_pkt.opcode = LB;
@@ -263,11 +353,50 @@ module bp_me_cce_to_cache
             if (cmd_counter_r == cmd_max_count_r)
               begin
                 cmd_counter_n = '0;
+                cmd_state_n = READY; // is_multi_cycle_req ? MULTI_CYCLE : EADY;
+                mem_cmd_yumi_li = 1'b1;
+              end
+          end
+      end
+      MULTI_CYCLE: begin
+        v_o = 1'b1;
+        case (mem_cmd_lo.header.msg_type)
+          e_bedrock_mem_rd
+          ,e_bedrock_mem_uc_rd:
+            cache_pkt.opcode = LM;
+          e_bedrock_mem_uc_wr
+          ,e_bedrock_mem_wr
+          ,e_bedrock_mem_amo:
+            cache_pkt.opcode = SM;
+          default: cache_pkt.opcode = LB;
+        endcase
+
+        if ((mem_cmd_lo.header.addr < dram_base_addr_gp) && (local_addr_cast.dev == cache_tagfl_base_addr_gp))
+          begin
+            cache_pkt.opcode = TAGFL;
+            cache_pkt.addr = {cmd_data[0][0+:lg_sets_lp+lg_ways_lp], block_offset_width_lp'(0)};
+          end
+        else
+          begin
+            cache_pkt.data = cmd_data[cmd_counter_r];
+            cache_pkt.addr = cmd_addr + cmd_counter_r*data_mask_width_lp;
+            cache_pkt.mask = '1;
+          end
+
+        if (ready_i)
+          begin
+            cmd_counter_n = cmd_counter_r + 1;
+            if (cmd_counter_r == cmd_max_count_r)
+              begin
                 cmd_state_n = READY;
                 mem_cmd_yumi_li = 1'b1;
               end
           end
       end
+    /////////////
+    /////////////
+    /////////////
+    /////////////
     endcase
   end
 
