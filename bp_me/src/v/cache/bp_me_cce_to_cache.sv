@@ -287,30 +287,22 @@ module bp_me_cce_to_cache
     );
   assign mem_resp_header_yumi_li = mem_resp_yumi_i;
 
-  typedef enum logic [1:0] {
-    RESP_RESET
-    ,RESP_READY
-  } resp_state_e;
-
-  resp_state_e resp_state_r, resp_state_n;
   logic [counter_width_lp-1:0] resp_counter_r, resp_counter_n;
   logic [counter_width_lp-1:0] resp_max_count_r, resp_max_count_n;
-
+  logic [l2_block_size_in_words_p-1:0] resp_data_en;
   logic [l2_block_size_in_words_p-1:0][l2_data_width_p-1:0] resp_data_r;
+  logic resp_busy_r;
 
   // synopsys sync_set_reset "reset_i"
   always_ff @(posedge clk_i) begin
     if (reset_i) begin
-      resp_state_r      <= RESP_RESET;
       resp_counter_r    <= '0;
     end
     else begin
-      resp_state_r      <= resp_state_n;
       resp_counter_r    <= resp_counter_n;
     end
   end
 
-  logic resp_busy_r;
   bsg_dff_reset_set_clear
    #(.width_p(1)
    ,.clear_over_set_p(1))
@@ -322,14 +314,11 @@ module bp_me_cce_to_cache
     ,.data_o(resp_busy_r)
     );
   
-  // new resp count
-  logic resp_max_cnt_en_li;
-  logic [counter_width_lp-1:0] resp_max_count_new;
   bsg_dff_en_bypass
    #(.width_p(counter_width_lp))
    resp_max_count_reg
     (.clk_i(clk_i)
-    ,.en_i(mem_resp_header_v_lo & ~resp_busy_r)
+    ,.en_i(mem_resp_header_v_lo & ~resp_busy_r) // TOCHECK can be opt out?
     ,.data_i(resp_max_count_n)
     ,.data_o(resp_max_count_r)
     );
@@ -349,6 +338,25 @@ module bp_me_cce_to_cache
     ,.data_o(resp_data_done_r)
     );
 
+  bsg_decode 
+   #(.num_out_p(l2_block_size_in_words_p))
+   resp_count_decode
+    (.i(resp_counter_r)
+    ,.o(resp_data_en)
+    );
+
+  for (genvar i = 0; i < 8; i++)
+    begin : data_slice
+      bsg_dff_en_bypass
+       #(.width_p(l2_data_width_p))
+       resp_data_reg
+        (.clk_i(clk_i)
+        ,.en_i(resp_data_en[i] & yumi_o)
+        ,.data_i(data_i)
+        ,.data_o(resp_data_r[i])
+        );
+    end
+
   wire [cce_block_width_p-1:0] resp_data_slice = resp_data_r;
   bsg_bus_pack
    #(.width_p(cce_block_width_p))
@@ -362,19 +370,14 @@ module bp_me_cce_to_cache
 
   assign yumi_o = is_clear_tag ? v_i : v_i & ~resp_data_done_r; // cache "acks" TAGST commands with zero-data responses
   always_comb begin
-    resp_state_n = resp_state_r;
-    resp_counter_n = resp_counter_r;
+    resp_counter_n = '0;
     resp_max_count_n = '0;
 
     resp_data_done_li = 1'b0;
     mem_resp_v_o = 1'b0;
 
-    case (resp_state_r)
-      RESP_RESET: begin
-        // hold in RESP_RESET until command FSM finishes clearing cache tags
-        resp_state_n = (cmd_state_n == READY) ? RESP_READY : RESP_RESET;
-      end
-      RESP_READY: begin
+    if (~is_clear_tag)
+      begin
         case (mem_resp_cast_o.header.size)
           e_bedrock_msg_size_1
           ,e_bedrock_msg_size_2
@@ -391,28 +394,7 @@ module bp_me_cce_to_cache
         // mem_resp is sent
         resp_counter_n = mem_resp_yumi_i ? '0 : resp_counter_r + yumi_o;
       end
-    endcase
   end
-
-  logic [l2_block_size_in_words_p-1:0] resp_data_en;
-  bsg_decode 
-   #(.num_out_p(l2_block_size_in_words_p))
-   resp_count_decode
-    (.i(resp_counter_r)
-    ,.o(resp_data_en)
-    );
-
-  for (genvar i = 0; i < 8; i++)
-    begin : d
-      bsg_dff_en_bypass
-       #(.width_p(l2_data_width_p))
-       resp_data_reg
-        (.clk_i(clk_i)
-        ,.en_i(resp_data_en[i] & yumi_o)
-        ,.data_i(data_i)
-        ,.data_o(resp_data_r[i])
-        );
-    end
   
   //synopsys translate_off
   always_ff @(negedge clk_i)
